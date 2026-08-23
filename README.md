@@ -96,7 +96,7 @@ chmod +x setup.sh; ./setup.sh
 ```
 tikutils/
 ├── setup.sh                      # One-command installer
-├── VERSION                       # Version string (dev-003)
+├── VERSION                       # Version string
 ├── LICENSE                       # MIT License
 ├── net.buwryy.TikUtils.desktop   # Desktop entry
 ├── assets/
