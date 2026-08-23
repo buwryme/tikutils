@@ -20,9 +20,9 @@
   <rect x="12" y="16" width="104" height="96" rx="24" fill="url(#baseProfileGradient)" />
   <rect x="12" y="12" width="104" height="96" rx="24" fill="url(#bgGradient)" />
   <g id="metaphor-glyph">
-    <circle cx="38" cy="74" r="14" fill="url(#glyphGradient)" />
     <path d="M 52,74 L 52,32 L 66,32 C 76,32 84,40 84,52 L 84,64 C 74,64 66,56 66,44 L 66,74 Z" fill="url(#glyphGradient)" />
-    <path d="M 34,68 L 44,74 L 34,80 Z" fill="url(#accentGradient)" />
+    <circle cx="46" cy="74" r="14" fill="url(#glyphGradient)" />
+    <path d="M 43,68 L 53,74 L 43,80 Z" fill="url(#accentGradient)" />
     <rect x="90" y="58" width="6" height="24" rx="3" fill="url(#accentGradient)" />
     <rect x="100" y="46" width="6" height="36" rx="3" fill="url(#glyphGradient)" />
   </g>
