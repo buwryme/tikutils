@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=TikUtils
+Comment=A TikTok analytics & stream downloader app made with GTK4/Libadwaita
+Exec=@BINDIR@/tikutils %U
+Icon=net.buwryy.TikUtils
+Terminal=false
+Type=Application
+Categories=AudioVideo;Network;GTK;
+Keywords=tiktok;video;download;analytics;
+StartupNotify=true
