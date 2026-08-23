@@ -9,7 +9,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20GNOME-333333?style=for-the-badge&logo=linux&logoColor=white)](#installation)
 [![GTK](https://img.shields.io/badge/GTK-4.0%20%7C%20Libadwaita-orange?style=for-the-badge&logo=gnome&logoColor=white)](#features)
-[![Version](https://img.shields.io/badge/Version-dev--003-purple?style=for-the-badge)](VERSION)
+[![Version](https://img.shields.io/badge/Version-v1.0.0-purple?style=for-the-badge)](VERSION)
 
 *A native GNOME application for analyzing TikTok video streams, downloading streams, and patching MP4 containers to bypass server-side re-encoding.*
 
