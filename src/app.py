@@ -399,23 +399,40 @@ class PatcherSettingsPage(Adw.NavigationPage):
         patch_group = Adw.PreferencesGroup(title="Patcher Options")
 
         reenc_row = Adw.ActionRow(title="Re-encode Video")
-        reenc_row.set_subtitle("HEVC, Main 10, 20K Bitrate...")
         self.reenc_switch = Gtk.Switch(valign=Gtk.Align.CENTER)
         self.reenc_switch.set_active(self.config_manager.config.get("re_encode", True))
-        self.reenc_switch.connect("notify::active", self.on_setting_changed)
+        self.reenc_switch.connect("notify::active", self.on_reenc_toggled)
         reenc_row.add_suffix(self.reenc_switch)
         reenc_row.set_activatable_widget(self.reenc_switch)
         patch_group.add(reenc_row)
+
+        codec_row = Adw.ActionRow(title="Codec")
+        codec_row.set_subtitle("Video codec for encoding")
+        codec_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        self.codec_combo = Gtk.ComboBoxText()
+        self.codec_combo.append("h264", "H.264")
+        self.codec_combo.append("h265", "H.265")
+        codec = self.config_manager.config.get("codec", "h265")
+        self.codec_combo.set_active_id(codec)
+        self.codec_combo.connect("changed", self.on_setting_changed)
+        self.codec_combo.set_size_request(120, -1)
+        codec_box.append(self.codec_combo)
+        codec_row.add_suffix(codec_box)
+        codec_row.set_activatable_widget(self.codec_combo)
+        self.codec_row = codec_row
+        patch_group.add(codec_row)
+        
+        saved_bitrate = self.config_manager.config.get("avg_bitrate", 15)
 
         bitrate_row = Adw.ActionRow(title="Bitrate")
         bitrate_row.set_subtitle("1.5k - 20k kbps")
         bitrate_container = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
         self.bitrate_scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 1.5, 20, 0.5)
         self.bitrate_scale.set_draw_value(False)
-        self.bitrate_scale.set_value(self.config_manager.config.get("avg_bitrate", 15))
+        self.bitrate_scale.set_value(saved_bitrate)
         self.bitrate_scale.set_size_request(260, -1)
         self.bitrate_scale.set_hexpand(True)
-        self.bitrate_label = Gtk.Label(label="15.0k")
+        self.bitrate_label = Gtk.Label(label=f"{saved_bitrate:.1f}k")
         self.bitrate_label.set_size_request(40, -1)
         self.bitrate_label.set_halign(Gtk.Align.END)
         self.bitrate_label.add_css_class("numeric")
@@ -425,7 +442,10 @@ class PatcherSettingsPage(Adw.NavigationPage):
         bitrate_container.append(self.bitrate_label)
         bitrate_row.add_suffix(bitrate_container)
         bitrate_row.set_activatable_widget(self.bitrate_scale)
+        self.bitrate_row = bitrate_row
         patch_group.add(bitrate_row)
+
+        self.update_encoding_visibility()
 
         infl_row = Adw.ActionRow(title="Inflation Factor")
         infl_row.set_subtitle("Multiplier for audio sample table padding")
@@ -480,6 +500,7 @@ class PatcherSettingsPage(Adw.NavigationPage):
         for field, entry in self.entries.items():
             cfg[field] = entry.get_text()
         cfg["re_encode"] = self.reenc_switch.get_active()
+        cfg["codec"] = self.codec_combo.get_active_id()
         cfg["avg_bitrate"] = self.bitrate_scale.get_value()
         cfg["inflation_rate"] = int(self.infl_spin.get_value())
         cfg["trailing_bytes"] = int(self.trail_spin.get_value())
@@ -489,6 +510,15 @@ class PatcherSettingsPage(Adw.NavigationPage):
         value = scale.get_value()
         self.bitrate_label.set_label(f"{value:.1f}k")
         GLib.idle_add(self.on_setting_changed)
+
+    def on_reenc_toggled(self, switch, param):
+        self.update_encoding_visibility()
+        self.on_setting_changed()
+
+    def update_encoding_visibility(self):
+        is_enabled = self.reenc_switch.get_active()
+        self.codec_row.set_visible(is_enabled)
+        self.bitrate_row.set_visible(is_enabled)
 
     def on_setting_changed(self, *args):
         self.save_btn.set_sensitive(self.get_current_config() != self.original_config)

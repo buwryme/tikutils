@@ -37,7 +37,7 @@ class ConfigManager:
             "artist": META_ARTIST, "composer": META_COMPOSER, "album": META_ALBUM,
             "encoder": META_ENCODER, "comment": META_COMMENT, "copyright": META_COPYRIGHT,
             "grouping": META_GROUPING, "inflation_rate": 10, "trailing_bytes": 1024, "re_encode": True,
-            "avg_bitrate": 15
+            "avg_bitrate": 15, "codec": "h264"
         }
         self.config = self.default_config.copy()
         self.load()
@@ -82,9 +82,10 @@ def patch_video(input_path: str, config: dict = None) -> bool:
     log.info(f"Starting patch pipeline for: {input_path}")
 
     if re_encode:
-        log.info("Step 1/2: Re-encoding video to HEVC Main 10...")
+        log.info("Step 1/2: Re-encoding video...")
         avg_bitrate = config.get("avg_bitrate", 15) if config else 15
-        if not encode_for_tiktok(input_path, output_path, avg_bitrate):
+        codec = config.get("codec", "h265") if config else "h265"
+        if not encode_for_tiktok(input_path, output_path, avg_bitrate, codec):
             raise RuntimeError("Encoding failed during execution")
         target_file = output_path
     else:
@@ -548,16 +549,20 @@ def fix_offsets_recursive(data: bytearray, start: int, end: int, delta: int):
             fix_offsets_recursive(data, pos + 8, pos + sz, delta)
         pos += sz
 
-def encode_for_tiktok(input_path: str, output_path: str, avg_bitrate: float = 15) -> bool:
+def encode_for_tiktok(input_path: str, output_path: str, avg_bitrate: float = 15, codec: str = "h265") -> bool:
     avg_bps = int(avg_bitrate * 1000)
     max_bps = int(avg_bitrate * 1000 * 1.33)
     buf_bps = int(avg_bitrate * 1000 * 2)
     
+    if codec == "h264":
+        video_codec_args = ["-c:v", "libx264", "-preset", "medium", "-profile:v", "high", "-pix_fmt", "yuv420p"]
+    else:
+        video_codec_args = ["-c:v", "libx265", "-preset", "medium", "-profile:v", "main10", "-pix_fmt", "yuv420p10le"]
+    
     cmd = [
         "ffmpeg", "-i", input_path,
-        "-c:v", "libx265", "-preset", "medium", "-profile:v", "main10",
+        *video_codec_args,
         "-b:v", f"{avg_bps}k", "-maxrate", f"{max_bps}k", "-bufsize", f"{buf_bps}k",
-        "-pix_fmt", "yuv420p10le",
         "-c:a", "aac", "-b:a", "256k",
         "-movflags", "+faststart",
         "-metadata:s:v", "handler_name=VideoHandler",
