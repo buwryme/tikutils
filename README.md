@@ -4,7 +4,7 @@
 
 # TikUtils
 
-### Minimal TikTok Analytics & Lossless Stream Patcher app
+### TikTok Analytics & Lossless Stream Patcher app
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20GNOME-333333?style=for-the-badge&logo=linux&logoColor=white)](#installation)
@@ -18,8 +18,6 @@
 ---
 
 ## ⚡ Quick Start
-
-Get up and running in seconds. No manual dependency hunting required.
 
 ```bash
 git clone https://github.com/buwryme/tikutils.git
@@ -37,7 +35,7 @@ The setup script automatically installs the application, configures desktop inte
 
 | 🔍 **Stream Analyzer** | 🎬 **Lossless Patcher** | 📥 **Smart Downloader** |
 | :--- | :--- | :--- |
-| Extract full metadata, stats, and all available stream variants from any TikTok URL | Patch MP4 sample tables to trigger TikTok's passthrough mode, preserving HEVC Main 10 quality | Download origin sources or specific streams with XDG portal integration and progress tracking |
+| Extract full metadata, stats, and all available stream variants from any TikTok URL | Patch MP4 sample tables to trigger TikTok's passthrough mode, preserving quality | Download origin sources or specific streams with XDG portal integration and progress tracking |
 
 </div>
 
@@ -52,8 +50,7 @@ The setup script automatically installs the application, configures desktop inte
 -   **Patch MP4 structure**: Reorder moov before mdat, strip timecode tracks, normalize handler names
 -   **Inflate audio stsz** by configurable factor to create deliberate sample table mismatch
 -   **Inject custom udta metadata** (artist, composer, album, copyright, grouping)
--   **Append trailing dummy bytes** to confuse strict validators
--   Clean-room reverse engineered posting method — no watermarks, no quality loss
+-   **Append trailing dummy bytes**
 
 ### 📥 Intelligent Downloads
 -   Resolves unwatermarked origin files via TikTok's CDN when available
@@ -63,23 +60,12 @@ The setup script automatically installs the application, configures desktop inte
 -   Toast notifications for every state: downloading, saved, cancelled, failed
 
 ### 🖥️ Native GNOME Experience
--   Built with **GTK4** and **Libadwaita** — follows GNOME HIG 100%
--   Adaptive layout with `Adw.Clamp` and `Adw.NavigationView` slide transitions
--   Dynamic separators that size to content, not terminal width
--   Nerd Font icons throughout for consistent visual language
+-   Built with **GTK4** and **Libadwaita** — for a native GNOME experience
 -   Very verbose timestamped logging to `~/.local/share/net.buwryy.TikUtils/logs/`
 
 ---
 
 ## 📦 Installation
-
-### Prerequisites
-
-| Dependency | Purpose | Install (Arch) | Install (Fedora) | Install (Ubuntu/Debian) |
-|---|---|---|---|---|
-| `yt-dlp` | Metadata & stream extraction | `pacman -S yt-dlp` | `dnf install yt-dlp` | `apt install yt-dlp` |
-| `ffmpeg` | Video encoding & remuxing | `pacman -S ffmpeg` | `dnf install ffmpeg` | `apt install ffmpeg` |
-| GTK4 + Libadwaita | UI toolkit | `pacman -S gtk4 libadwaita python-gobject` | `dnf install gtk4-devel libadwaita-devel python3-gobject` | `apt install libadwaita-1-dev python3-gi gir1.2-gtk-4.0 gir1.2-adw-1` |
 
 ### Setup:
 
