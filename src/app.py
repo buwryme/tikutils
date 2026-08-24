@@ -489,6 +489,8 @@ class PatcherSettingsPage(Adw.NavigationPage):
         value = scale.get_value()
         self.bitrate_label.set_label(f"{value:.1f}k")
         GLib.idle_add(self.on_setting_changed)
+
+    def on_setting_changed(self, *args):
         self.save_btn.set_sensitive(self.get_current_config() != self.original_config)
 
     def on_save_clicked(self, btn):
