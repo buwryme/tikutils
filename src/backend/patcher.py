@@ -36,7 +36,8 @@ class ConfigManager:
         self.default_config = {
             "artist": META_ARTIST, "composer": META_COMPOSER, "album": META_ALBUM,
             "encoder": META_ENCODER, "comment": META_COMMENT, "copyright": META_COPYRIGHT,
-            "grouping": META_GROUPING, "inflation_rate": 10, "trailing_bytes": 1024, "re_encode": True
+            "grouping": META_GROUPING, "inflation_rate": 10, "trailing_bytes": 1024, "re_encode": True,
+            "avg_bitrate": 15
         }
         self.config = self.default_config.copy()
         self.load()
@@ -82,7 +83,8 @@ def patch_video(input_path: str, config: dict = None) -> bool:
 
     if re_encode:
         log.info("Step 1/2: Re-encoding video to HEVC Main 10...")
-        if not encode_for_tiktok(input_path, output_path):
+        avg_bitrate = config.get("avg_bitrate", 15) if config else 15
+        if not encode_for_tiktok(input_path, output_path, avg_bitrate):
             raise RuntimeError("Encoding failed during execution")
         target_file = output_path
     else:
@@ -546,11 +548,15 @@ def fix_offsets_recursive(data: bytearray, start: int, end: int, delta: int):
             fix_offsets_recursive(data, pos + 8, pos + sz, delta)
         pos += sz
 
-def encode_for_tiktok(input_path: str, output_path: str) -> bool:
+def encode_for_tiktok(input_path: str, output_path: str, avg_bitrate: float = 15) -> bool:
+    avg_bps = int(avg_bitrate * 1000)
+    max_bps = int(avg_bitrate * 1000 * 1.33)
+    buf_bps = int(avg_bitrate * 1000 * 2)
+    
     cmd = [
         "ffmpeg", "-i", input_path,
         "-c:v", "libx265", "-preset", "medium", "-profile:v", "main10",
-        "-b:v", "15000k", "-maxrate", "20000k", "-bufsize", "40000k",
+        "-b:v", f"{avg_bps}k", "-maxrate", f"{max_bps}k", "-bufsize", f"{buf_bps}k",
         "-pix_fmt", "yuv420p10le",
         "-c:a", "aac", "-b:a", "256k",
         "-movflags", "+faststart",

@@ -407,6 +407,26 @@ class PatcherSettingsPage(Adw.NavigationPage):
         reenc_row.set_activatable_widget(self.reenc_switch)
         patch_group.add(reenc_row)
 
+        bitrate_row = Adw.ActionRow(title="Bitrate")
+        bitrate_row.set_subtitle("1.5k - 20k kbps")
+        bitrate_container = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        self.bitrate_scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 1.5, 20, 0.5)
+        self.bitrate_scale.set_draw_value(False)
+        self.bitrate_scale.set_value(self.config_manager.config.get("avg_bitrate", 15))
+        self.bitrate_scale.set_size_request(260, -1)
+        self.bitrate_scale.set_hexpand(True)
+        self.bitrate_label = Gtk.Label(label="15.0k")
+        self.bitrate_label.set_size_request(40, -1)
+        self.bitrate_label.set_halign(Gtk.Align.END)
+        self.bitrate_label.add_css_class("numeric")
+        self.bitrate_label.add_css_class("dim-label")
+        self.bitrate_scale.connect("value-changed", self.on_bitrate_changed)
+        bitrate_container.append(self.bitrate_scale)
+        bitrate_container.append(self.bitrate_label)
+        bitrate_row.add_suffix(bitrate_container)
+        bitrate_row.set_activatable_widget(self.bitrate_scale)
+        patch_group.add(bitrate_row)
+
         infl_row = Adw.ActionRow(title="Inflation Factor")
         infl_row.set_subtitle("Multiplier for audio sample table padding")
         self.infl_spin = Gtk.SpinButton.new_with_range(1, 100, 1)
@@ -460,11 +480,15 @@ class PatcherSettingsPage(Adw.NavigationPage):
         for field, entry in self.entries.items():
             cfg[field] = entry.get_text()
         cfg["re_encode"] = self.reenc_switch.get_active()
+        cfg["avg_bitrate"] = self.bitrate_scale.get_value()
         cfg["inflation_rate"] = int(self.infl_spin.get_value())
         cfg["trailing_bytes"] = int(self.trail_spin.get_value())
         return cfg
 
-    def on_setting_changed(self, *args):
+    def on_bitrate_changed(self, scale):
+        value = scale.get_value()
+        self.bitrate_label.set_label(f"{value:.1f}k")
+        GLib.idle_add(self.on_setting_changed)
         self.save_btn.set_sensitive(self.get_current_config() != self.original_config)
 
     def on_save_clicked(self, btn):
