@@ -2,22 +2,26 @@
 
 <img src="assets/icon.svg" width="128" height="128" alt="TikUtils Icon">
 
-# TikUtils
+# tikutils
 
-### TikTok Analytics & Lossless Stream Patcher app
+gtk4/libadwaita tiktok analytics & lossless stream patcher for linux
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](LICENSE)
-[![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20GNOME-333333?style=for-the-badge&logo=linux&logoColor=white)](#installation)
-[![GTK](https://img.shields.io/badge/GTK-4.0%20%7C%20Libadwaita-orange?style=for-the-badge&logo=gnome&logoColor=white)](#features)
-[![Version](https://img.shields.io/badge/Version-v1.0.0-purple?style=for-the-badge)](VERSION)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
+[![Version](https://img.shields.io/badge/Version-v1.1.0-purple?style=flat-square)](VERSION)
+[![Platform](https://img.shields.io/badge/Platform-Linux-Linux?style=flat-square&logo=linux&logoColor=white)](#installation)
+[![GTK](https://img.shields.io/badge/GTK-4.0%20%7C%20Libadwaita-orange?style=flat-square&logo=gnome&logoColor=white)](#features)
 
-*A native GNOME application for analyzing TikTok video streams, downloading streams, and patching MP4 containers to bypass server-side re-encoding.*
 
 </div>
 
 ---
 
-## ⚡ Quick Start
+## requirements
+- python 3.10+
+- ffmpeg & yt-dlp (in `$PATH`)
+- gtk4 & libadwaita
+
+## usage
 
 ```bash
 git clone https://github.com/buwryme/tikutils.git
@@ -25,122 +29,34 @@ cd tikutils
 chmod +x setup.sh; ./setup.sh
 ```
 
-The setup script automatically installs the application, configures desktop integration, verifies dependencies (`yt-dlp`, `ffmpeg`), and places the launcher in your PATH. Run `tikutils` from your terminal or find it in your app grid.
+run `tikutils` from your terminal or app grid.
+
+> [!IMPORTANT]
+> audio may not show in the tiktok interface preview & review takes ~10 mins. this is normal. you and viewers will still hear it.
+
+## features
+
+*   **analyzer:** fetch metadata, stats, and resolve unwatermarked origin urls.
+*   **patcher:** re-encodes to **h.265/h.264 crf 18** and patches mp4 structure to force tiktok passthrough.
+*   **downloader:** native save dialogs with progress tracking.
+
+## how it works
+
+1.  encodes video using constant rate factor (crf) for consistent quality.
+2.  inflates audio `stsz` table to create a structural mismatch.
+3.  strips `tmcd`/`tref` tracks and normalizes handler names.
+4.  injects custom metadata and trailing dummy bytes.
+
+tiktok's transcoders choke on the mismatch and skip re-encoding. mobile decoders ignore it and play normally.
 
 ---
 
-## ✨ Features
+> works as of aug 2026. use responsibly
+
+for inquiries contact **@buwryy** on discord
 
 <div align="center">
 
-| 🔍 **Stream Analyzer** | 🎬 **Lossless Patcher** | 📥 **Smart Downloader** |
-| :--- | :--- | :--- |
-| Extract full metadata, stats, and all available stream variants from any TikTok URL | Patch MP4 sample tables to trigger TikTok's passthrough mode, preserving quality | Download origin sources or specific streams with XDG portal integration and progress tracking |
-
-</div>
-
-### 🔍 Deep Stream Analysis
--   Parses TikTok's internal API and web rehydration JSON to resolve true origin URLs
--   Displays all available video streams with codec, bitrate, resolution, and file size
--   Deduplicates identical streams by signature matching
--   Real-time metadata extraction including views, likes, comments, favorites, and shares
-
-### 🎬 Lossless Upload Pipeline
--   **Re-encode** to HEVC Main 10 @ 20K bitrate with yuv420p10le pixel format (Best for playback)
--   **Patch MP4 structure**: Reorder moov before mdat, strip timecode tracks, normalize handler names
--   **Inflate audio stsz** by configurable factor to create deliberate sample table mismatch
--   **Inject custom udta metadata** (artist, composer, album, copyright, grouping)
--   **Append trailing dummy bytes**
-
-### 📥 Intelligent Downloads
--   Resolves unwatermarked origin files via TikTok's CDN when available
--   Falls back to yt-dlp format selection for standard streams
--   Native XDG Desktop Portal save dialogs — never hardcodes a download path
--   Header-integrated progress bar with activity pulsing for ffmpeg operations
--   Toast notifications for every state: downloading, saved, cancelled, failed
-
-### 🖥️ Native GNOME Experience
--   Built with **GTK4** and **Libadwaita** — for a native GNOME experience
--   Very verbose timestamped logging to `~/.local/share/net.buwryy.TikUtils/logs/`
-
----
-
-## 📦 Installation
-
-### Setup:
-
-```bash
-git clone https://github.com/buwryme/tikutils.git
-cd tikutils
-chmod +x setup.sh; ./setup.sh
-```
-
----
-
-## 🏗️ Project Structure
-
-```
-tikutils/
-├── setup.sh                      # One-command installer
-├── VERSION                       # Version string
-├── LICENSE                       # MIT License
-├── net.buwryy.TikUtils.desktop   # Desktop entry
-├── assets/
-│   └── icon.svg                  # Adwaita-compliant app icon
-└── src/
-    ├── app.py                    # GTK4/Libadwaita application
-    └── backend/
-        ├── __init__.py
-        ├── analyzer.py           # TikTok metadata & origin resolution
-        └── patcher.py            # MP4 parsing, stsz inflation, ffmpeg encoding
-```
-
----
-
-## 🧠 How the Patcher Works
-
-TikTok's ingest pipeline validates MP4 sample table consistency before deciding whether to transcode. TikUtils exploits this validation:
-
-1.  **Encode** to HEVC Main 10 with TikTok-optimal parameters (15M bitrate, 20M maxrate, yuv420p10le)
-2.  **Strip** the timecode track (`tmcd`) and track references (`tref`) that ffmpeg adds by default
-3.  **Normalize** handler names to `VideoHandler` / `SoundHandler`
-4.  **Inflate** the audio `stsz` (sample size table) by N× while leaving `stts` (time-to-sample) at its original count — creating a deliberate mismatch
-5.  **Replace** `udta` metadata with configurable tags
-6.  **Append** trailing malformed data to confuse strict validators
-
-Strict transcoders choke on the mismatch and fall back to **passthrough**. Lenient players (TikTok's mobile decoder) ignore the mismatch and play the actual frames. The result: your uploaded video retains full quality with zero server-side re-encoding.
-
-> ⚠️ *This is speculation based on clean-room reverse engineering of a known posting method. Behavior may change as TikTok updates their ingest pipeline.*
-
----
-
-## ⚙️ Configuration
-
-Settings are stored at `~/.local/share/net.buwryy.TikUtils/settings.json` and managed entirely through the in-app preferences UI.
-
-| Setting | Default | Description |
-|---|---|---|
-| Artist / Composer / Album / Comment / Copyright / Grouping | `buwryy` | udta metadata fields embedded in the patched MP4 |
-| Inflation Factor | `10` | Multiplier for audio stsz padding (higher = more aggressive mismatch) |
-| Trailing Dummy Bytes | `1024` | Size of malformed data appended to file end |
-| Re-encode Video | `true` | Encode to HEVC Main 10 before patching (disable to patch existing HEVC files) |
-
-Logs are written to `~/.local/share/net.buwryy.TikUtils/logs/` with full DEBUG verbosity. Terminal output shows INFO-level messages only.
-
----
-
-## 📜 License
-
-This project is licensed under the **MIT License**. See [LICENSE](LICENSE) for details.
-
-Clean-room reverse engineering of a known posting method. For legal inquiries, contact [@buwryy on Discord](https://discord.com).
-
----
-
-<div align="center">
-
-**Made with ♥ by [buwryme](https://github.com/buwryme)**
-
-*If TikUtils helped you preserve video quality, consider starring the repo ⭐*
+**made with ♥ by [buwryme](https://github.com/buwryme)**
 
 </div>

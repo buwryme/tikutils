@@ -190,7 +190,7 @@ class TikUtilsWindow(Adw.ApplicationWindow):
             about.set_developers(["buwryme"])
             about.set_license_type(Gtk.License.MIT_X11)
             about.set_comments("TikTok utilities app made with GTK4/Libadwaita")
-            about.set_website("https://buwry.me")
+            about.set_website("https://github.com/buwryme")
             about.present(self)
         except AttributeError:
             about = Adw.AboutWindow.new()
@@ -421,29 +421,36 @@ class PatcherSettingsPage(Adw.NavigationPage):
         codec_row.set_activatable_widget(self.codec_combo)
         self.codec_row = codec_row
         patch_group.add(codec_row)
-        
-        saved_bitrate = self.config_manager.config.get("avg_bitrate", 15)
 
-        bitrate_row = Adw.ActionRow(title="Bitrate")
-        bitrate_row.set_subtitle("1.5k - 20k kbps")
-        bitrate_container = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-        self.bitrate_scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 1.5, 20, 0.5)
-        self.bitrate_scale.set_draw_value(False)
-        self.bitrate_scale.set_value(saved_bitrate)
-        self.bitrate_scale.set_size_request(260, -1)
-        self.bitrate_scale.set_hexpand(True)
-        self.bitrate_label = Gtk.Label(label=f"{saved_bitrate:.1f}k")
-        self.bitrate_label.set_size_request(40, -1)
-        self.bitrate_label.set_halign(Gtk.Align.END)
-        self.bitrate_label.add_css_class("numeric")
-        self.bitrate_label.add_css_class("dim-label")
-        self.bitrate_scale.connect("value-changed", self.on_bitrate_changed)
-        bitrate_container.append(self.bitrate_scale)
-        bitrate_container.append(self.bitrate_label)
-        bitrate_row.add_suffix(bitrate_container)
-        bitrate_row.set_activatable_widget(self.bitrate_scale)
-        self.bitrate_row = bitrate_row
-        patch_group.add(bitrate_row)
+        # REPLACED BITRATE ROW WITH CRF ROW
+        saved_crf = self.config_manager.config.get("crf", 18)
+        crf_row = Adw.ActionRow(title="Quality (CRF)")
+        crf_row.set_subtitle("Lower is better quality/larger file (0-51)")
+
+        crf_container = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+
+        # CRF Scale: Range 0-51, step 1. Default 18.
+        self.crf_scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 51, 1)
+        self.crf_scale.set_draw_value(False)
+        self.crf_scale.set_value(saved_crf)
+        self.crf_scale.set_size_request(260, -1)
+        self.crf_scale.set_hexpand(True)
+
+        self.crf_label = Gtk.Label(label=f"{saved_crf}")
+        self.crf_label.set_size_request(40, -1)
+        self.crf_label.set_halign(Gtk.Align.END)
+        self.crf_label.add_css_class("numeric")
+        self.crf_label.add_css_class("dim-label")
+
+        self.crf_scale.connect("value-changed", self.on_crf_changed)
+
+        crf_container.append(self.crf_scale)
+        crf_container.append(self.crf_label)
+
+        crf_row.add_suffix(crf_container)
+        crf_row.set_activatable_widget(self.crf_scale)
+        self.crf_row = crf_row
+        patch_group.add(crf_row)
 
         self.update_encoding_visibility()
 
@@ -501,14 +508,14 @@ class PatcherSettingsPage(Adw.NavigationPage):
             cfg[field] = entry.get_text()
         cfg["re_encode"] = self.reenc_switch.get_active()
         cfg["codec"] = self.codec_combo.get_active_id()
-        cfg["avg_bitrate"] = self.bitrate_scale.get_value()
+        cfg["crf"] = int(self.crf_scale.get_value())
         cfg["inflation_rate"] = int(self.infl_spin.get_value())
         cfg["trailing_bytes"] = int(self.trail_spin.get_value())
         return cfg
 
-    def on_bitrate_changed(self, scale):
-        value = scale.get_value()
-        self.bitrate_label.set_label(f"{value:.1f}k")
+    def on_crf_changed(self, scale):
+        value = int(scale.get_value())
+        self.crf_label.set_label(f"{value}")
         GLib.idle_add(self.on_setting_changed)
 
     def on_reenc_toggled(self, switch, param):
@@ -518,7 +525,7 @@ class PatcherSettingsPage(Adw.NavigationPage):
     def update_encoding_visibility(self):
         is_enabled = self.reenc_switch.get_active()
         self.codec_row.set_visible(is_enabled)
-        self.bitrate_row.set_visible(is_enabled)
+        self.crf_row.set_visible(is_enabled)
 
     def on_setting_changed(self, *args):
         self.save_btn.set_sensitive(self.get_current_config() != self.original_config)
