@@ -1,6 +1,6 @@
 """
 TikUtils Backend: Patcher
-Handles MP4 parsing, sample table inflation, and TikTok lossless passthrough patching.
+Handles MP4 parsing, dual-track audio inflation, and TikTok lossless passthrough patching.
 """
 import sys
 import struct
@@ -14,31 +14,28 @@ from datetime import datetime
 
 log = logging.getLogger("TikUtils.patcher")
 
-# Metadata defaults
 META_ARTIST   = "buwryy"
 META_COMPOSER = "buwryy"
 META_ALBUM    = "buwryy Posting Method"
-META_ENCODER  = "Lavf60.16.100"  # keep this exactly as it is
+META_ENCODER  = "Lavf60.16.100"
 META_COMMENT  = "patched by buwryy"
 META_COPYRIGHT = "buwryy"
 META_GROUPING = "buwryy"
 
 STSZ_INFLATE_FACTOR = 10
-TRAILING_GARBAGE_SIZE = 1024
+TRAILING_GARBAGE_SIZE = 16416
 
 class ConfigManager:
-    """Manages loading and saving user preferences to disk."""
     def __init__(self):
         self.config_dir = Path.home() / ".local" / "share" / "net.buwryy.TikUtils"
         self.config_path = self.config_dir / "settings.json"
         self.config_dir.mkdir(parents=True, exist_ok=True)
 
         self.default_config = {
-             "artist": META_ARTIST, "composer": META_COMPOSER, "album": META_ALBUM,
-             "encoder": META_ENCODER, "comment": META_COMMENT, "copyright": META_COPYRIGHT,
-             "grouping": META_GROUPING, "inflation_rate": 10, "trailing_bytes": 1024, "re_encode": True,
-             "crf": 18,
-             "codec": "h265"
+            "artist": META_ARTIST, "composer": META_COMPOSER, "album": META_ALBUM,
+            "encoder": META_ENCODER, "comment": META_COMMENT, "copyright": META_COPYRIGHT,
+            "grouping": META_GROUPING, "inflation_rate": 10, "trailing_bytes": 16416,
+            "re_encode": True, "crf": 18, "codec": "h264" # H264 is best for playback
         }
         self.config = self.default_config.copy()
         self.load()
@@ -94,7 +91,7 @@ def patch_video(input_path: str, config: dict = None) -> bool:
         log.info("Step 1/2: Skipping re-encode (using original file).")
         target_file = input_path
 
-    log.info("Step 2/2: Patching MP4 sample tables...")
+    log.info("Step 2/2: Patching MP4 structure...")
     if not patch_mp4(target_file):
         raise RuntimeError("Patching MP4 structure failed")
 
@@ -126,9 +123,7 @@ def parse_boxes(data: bytearray, start: int, end: int) -> list[dict]:
             size = (hi << 32) + lo
         elif raw_size == 0:
             size = end - pos
-
         if size < 8 or pos + size > end: break
-
         atype = data[pos+4:pos+8]
         boxes.append({"offset": pos, "size": size, "type": atype, "end": pos + size})
         pos += size
@@ -163,7 +158,8 @@ def build_data_atom(value: str) -> bytes:
 def build_ilst_entry(tag: bytes, value: str) -> bytes:
     return build_box(tag, build_data_atom(value))
 
-def build_udta(artist: str, composer: str, album: str, encoder: str, comment: str, copyright: str, grouping: str) -> bytes:
+def build_udta(artist: str, composer: str, album: str,
+               encoder: str, comment: str, copyright: str, grouping: str) -> bytes:
     ilst_payload = b''
     ilst_payload += build_ilst_entry('©ART'.encode('latin-1'), artist)
     ilst_payload += build_ilst_entry('©wrt'.encode('latin-1'), composer)
@@ -221,7 +217,6 @@ def patch_mp4(input_path: str, output_path: str = None) -> bool:
     log.debug(f"ftyp @ {ftyp_box['offset'] if ftyp_box else 'N/A'}")
     log.debug(f"moov @ {moov_box['offset']} ({moov_box['size']} bytes)")
     log.debug(f"mdat @ {mdat_box['offset']} ({mdat_box['size']} bytes)")
-
     if free_boxes: log.debug(f"Stripping {len(free_boxes)} free boxes.")
 
     log.info("[2/6] Reconstructing layout (ftyp → moov → mdat)...")
@@ -243,21 +238,17 @@ def patch_mp4(input_path: str, output_path: str = None) -> bool:
     moov_children = parse_boxes(moov_data, moov_inner_start, moov_inner_end)
 
     video_trak_idx = audio_trak_idx = tmcd_trak_idx = None
-    trak_indices = []
 
     for i, child in enumerate(moov_children):
         if child["type"] == b'trak':
-            trak_indices.append(i)
             trak_start = child["offset"] + 8
             trak_end = child["end"]
             trak_children = parse_boxes(moov_data, trak_start, trak_end)
-
             for tc in trak_children:
                 if tc["type"] == b'mdia':
                     mdia_start = tc["offset"] + 8
                     mdia_end = tc["end"]
                     mdia_children = parse_boxes(moov_data, mdia_start, mdia_end)
-
                     for mc in mdia_children:
                         if mc["type"] == b'hdlr':
                             hdlr_start = mc["offset"] + 8 + 4
@@ -283,9 +274,23 @@ def patch_mp4(input_path: str, output_path: str = None) -> bool:
             if i == tmcd_trak_idx:
                 log.debug("Stripped tmcd track.")
                 continue
+
             trak_data = bytearray(moov_data[child["offset"]:child["end"]])
-            trak_data = patch_trak(trak_data, i == video_trak_idx, i == audio_trak_idx, creation_time)
-            new_moov_children.append(bytes(trak_data))
+            is_audio = (i == audio_trak_idx)
+            is_video = (i == video_trak_idx)
+
+            if is_audio:
+                primary = patch_trak(trak_data, is_video, is_audio, creation_time, inflate=False)
+                new_moov_children.append(bytes(primary))
+
+                log.debug("Duplicating audio track for inflation...")
+                clone = bytearray(trak_data)
+                clone_patched = patch_trak(clone, False, True, creation_time, inflate=True)
+                new_moov_children.append(bytes(clone_patched))
+                log.debug("Appended inflated audio clone after primary")
+            else:
+                patched = patch_trak(trak_data, is_video, is_audio, creation_time, inflate=False)
+                new_moov_children.append(bytes(patched))
 
         elif child["type"] == b'udta':
             log.debug("Replacing existing udta.")
@@ -294,7 +299,8 @@ def patch_mp4(input_path: str, output_path: str = None) -> bool:
         else:
             new_moov_children.append(bytes(moov_data[child["offset"]:child["end"]]))
 
-    new_udta = build_udta(META_ARTIST, META_COMPOSER, META_ALBUM, META_ENCODER, META_COMMENT, META_COPYRIGHT, META_GROUPING)
+    new_udta = build_udta(META_ARTIST, META_COMPOSER, META_ALBUM,
+                          META_ENCODER, META_COMMENT, META_COPYRIGHT, META_GROUPING)
     new_moov_children.append(new_udta)
     log.debug(f"Injected metadata ({len(new_udta)} bytes)")
 
@@ -332,7 +338,9 @@ def patch_mp4(input_path: str, output_path: str = None) -> bool:
     log.info(f"Done! ({orig_size:,} bytes in, {final_size:,} bytes out)")
     return True
 
-def patch_trak(trak_data: bytearray, is_video: bool, is_audio: bool, creation_time: int) -> bytearray:
+
+def patch_trak(trak_data: bytearray, is_video: bool, is_audio: bool,
+               creation_time: int, inflate: bool = False) -> bytearray:
     trak_inner_start = 8
     trak_inner_end = len(trak_data)
     trak_children = parse_boxes(trak_data, trak_inner_start, trak_inner_end)
@@ -347,19 +355,19 @@ def patch_trak(trak_data: bytearray, is_video: bool, is_audio: bool, creation_ti
             new_trak_children.append(bytes(tkhd))
 
         elif tc["type"] == b'tref':
-            log.debug("Stripped tref.")
+            log.debug("Stripped tref")
             continue
 
         elif tc["type"] == b'edts':
-            if is_audio:
-                log.debug("Stripped audio elst.")
+            if is_audio or is_video:
+                log.debug(f"Stripped {'audio' if is_audio else 'video'} elst")
                 continue
             else:
                 new_trak_children.append(bytes(trak_data[tc["offset"]:tc["end"]]))
 
         elif tc["type"] == b'mdia':
             mdia_data = bytearray(trak_data[tc["offset"]:tc["end"]])
-            mdia_data = patch_mdia(mdia_data, is_video, is_audio, creation_time)
+            mdia_data = patch_mdia(mdia_data, is_video, is_audio, creation_time, inflate)
             new_trak_children.append(bytes(mdia_data))
 
         else:
@@ -368,7 +376,9 @@ def patch_trak(trak_data: bytearray, is_video: bool, is_audio: bool, creation_ti
     trak_payload = b''.join(new_trak_children)
     return bytearray(build_box(b'trak', trak_payload))
 
-def patch_mdia(mdia_data: bytearray, is_video: bool, is_audio: bool, creation_time: int) -> bytearray:
+
+def patch_mdia(mdia_data: bytearray, is_video: bool, is_audio: bool,
+               creation_time: int, inflate: bool = False) -> bytearray:
     mdia_inner_start = 8
     mdia_inner_end = len(mdia_data)
     mdia_children = parse_boxes(mdia_data, mdia_inner_start, mdia_inner_end)
@@ -383,14 +393,14 @@ def patch_mdia(mdia_data: bytearray, is_video: bool, is_audio: bool, creation_ti
             new_mdia_children.append(bytes(mdhd))
 
         elif mc["type"] == b'hdlr':
-            if is_video: new_hdlr = build_hdlr(b'vide', "VideoHandler")
-            elif is_audio: new_hdlr = build_hdlr(b'soun', "SoundHandler")
-            else: new_hdlr = build_hdlr(b'vide', "VideoHandler")
+            if is_video: new_hdlr = build_hdlr(b'vide', "")
+            elif is_audio: new_hdlr = build_hdlr(b'soun', "")
+            else: new_hdlr = build_hdlr(b'vide', "")
             new_mdia_children.append(new_hdlr)
 
         elif mc["type"] == b'minf':
             minf_data = bytearray(mdia_data[mc["offset"]:mc["end"]])
-            minf_data = patch_minf(minf_data, is_audio)
+            minf_data = patch_minf(minf_data, is_audio, inflate)
             new_mdia_children.append(bytes(minf_data))
 
         else:
@@ -399,7 +409,8 @@ def patch_mdia(mdia_data: bytearray, is_video: bool, is_audio: bool, creation_ti
     mdia_payload = b''.join(new_mdia_children)
     return bytearray(build_box(b'mdia', mdia_payload))
 
-def patch_minf(minf_data: bytearray, is_audio: bool) -> bytearray:
+
+def patch_minf(minf_data: bytearray, is_audio: bool, inflate: bool = False) -> bytearray:
     minf_inner_start = 8
     minf_inner_end = len(minf_data)
     minf_children = parse_boxes(minf_data, minf_inner_start, minf_inner_end)
@@ -409,14 +420,18 @@ def patch_minf(minf_data: bytearray, is_audio: bool) -> bytearray:
         if mc["type"] == b'nmhd':
             continue
         elif mc["type"] == b'stbl' and is_audio:
-            stbl_data = bytearray(minf_data[mc["offset"]:mc["end"]])
-            stbl_data = patch_stbl(stbl_data)
-            new_minf_children.append(bytes(stbl_data))
+            if inflate:
+                stbl_data = bytearray(minf_data[mc["offset"]:mc["end"]])
+                stbl_data = patch_stbl(stbl_data)
+                new_minf_children.append(bytes(stbl_data))
+            else:
+                new_minf_children.append(bytes(minf_data[mc["offset"]:mc["end"]]))
         else:
             new_minf_children.append(bytes(minf_data[mc["offset"]:mc["end"]]))
 
     minf_payload = b''.join(new_minf_children)
     return bytearray(build_box(b'minf', minf_payload))
+
 
 def patch_stbl(stbl_data: bytearray) -> bytearray:
     stbl_inner_start = 8
@@ -508,10 +523,15 @@ def patch_stbl(stbl_data: bytearray) -> bytearray:
     new_stsz = build_fullbox(b'stsz', 0, 0, new_stsz_payload)
     log.debug(f"Inflated stsz: {real_count} → {new_count} samples")
 
-    if real_count == 228:
-        stts_payload = struct.pack('>I', 2) + struct.pack('>II', 227, 1024) + struct.pack('>II', 1, 560)
-        new_stts = build_fullbox(b'stts', 0, 0, stts_payload)
-        log.debug("Forced audio stts: 2 entries → (227, 1024), (1, 560)")
+    orig_stts_pay = stbl_data[stts_box["offset"] + 12:stts_box["end"]]
+    orig_entry_count = read_u32be(orig_stts_pay, 0) if len(orig_stts_pay) >= 4 else 0
+
+    if extra_count > 0:
+        ext_payload = struct.pack('>I', orig_entry_count + 1)
+        ext_payload += orig_stts_pay[4:]
+        ext_payload += struct.pack('>II', extra_count, 1)
+        new_stts = build_fullbox(b'stts', 0, 0, ext_payload)
+        log.debug(f"Extended stts: {orig_entry_count} → {orig_entry_count + 1} entries (+({extra_count}, 1))")
     else:
         new_stts = bytes(stbl_data[stts_box["offset"]:stts_box["end"]])
         log.debug("Preserved original audio stts")
@@ -547,6 +567,7 @@ def patch_stbl(stbl_data: bytearray) -> bytearray:
     stbl_payload = b''.join(new_stbl_children)
     return bytearray(build_box(b'stbl', stbl_payload))
 
+
 def fix_chunk_offsets(data: bytearray, delta: int):
     top_boxes = parse_boxes(data, 0, len(data))
     for box in top_boxes:
@@ -558,15 +579,12 @@ def fix_offsets_recursive(data: bytearray, start: int, end: int, delta: int):
     while pos + 8 <= end:
         sz = read_u32be(data, pos)
         if sz < 8 or pos + sz > end: break
-
         typ = data[pos+4:pos+8]
-
         if typ == b'stco':
             cnt = read_u32be(data, pos + 12)
             for i in range(cnt):
                 v = read_u32be(data, pos + 16 + i*4)
                 if v > 0: write_u32be(data, pos + 16 + i*4, v + delta)
-
         elif typ == b'co64':
             cnt = read_u32be(data, pos + 12)
             for i in range(cnt):
@@ -577,33 +595,22 @@ def fix_offsets_recursive(data: bytearray, start: int, end: int, delta: int):
                     v += delta
                     write_u32be(data, pos + 16 + i*8, (v >> 32) & 0xFFFFFFFF)
                     write_u32be(data, pos + 20 + i*8, v & 0xFFFFFFFF)
-
         elif typ in (b'moov', b'trak', b'mdia', b'minf', b'stbl'):
             fix_offsets_recursive(data, pos + 8, pos + sz, delta)
-
         pos += sz
 
 def encode_for_tiktok(input_path: str, output_path: str, crf: int = 18, codec: str = "h265") -> bool:
-    """Encodes video for TikTok using CRF for better quality control."""
-
     if codec == "h264":
-        # H.264 CRF range is typically 0-51, sane values are 18-28
         video_codec_args = [
-            "-c:v", "libx264",
-            "-preset", "medium",
-            "-profile:v", "high",
-            "-pix_fmt", "yuv420p",
+            "-c:v", "libx264", "-preset", "medium",
+            "-profile:v", "high", "-pix_fmt", "yuv420p",
             "-crf", str(crf)
         ]
     else:
-        # H.265 CRF range is similar, but often looks better at slightly higher values than H.264
         video_codec_args = [
-            "-c:v", "libx265",
-            "-preset", "medium",
-            "-profile:v", "main10",
-            "-pix_fmt", "yuv420p10le",
-            "-crf", str(crf),
-            "-x265-params", "log-level=error" # Suppress x265 stats spam
+            "-c:v", "libx265", "-preset", "medium",
+            "-profile:v", "main10", "-pix_fmt", "yuv420p10le",
+            "-crf", str(crf), "-x265-params", "log-level=error"
         ]
 
     cmd = [
@@ -611,8 +618,8 @@ def encode_for_tiktok(input_path: str, output_path: str, crf: int = 18, codec: s
         *video_codec_args,
         "-c:a", "aac", "-b:a", "256k",
         "-movflags", "+faststart",
-        "-metadata:s:v", "handler_name=VideoHandler",
-        "-metadata:s:a", "handler_name=SoundHandler",
+        "-metadata:s:v", "handler_name=",
+        "-metadata:s:a", "handler_name=",
         "-y", output_path
     ]
 

@@ -31,9 +31,6 @@ chmod +x setup.sh; ./setup.sh
 
 run `tikutils` from your terminal or app grid.
 
-> [!IMPORTANT]
-> audio may not show in the tiktok interface preview & review takes ~10 mins. this is normal. you and viewers will still hear it.
-
 ## features
 
 *   **analyzer:** fetch metadata, stats, and resolve unwatermarked origin urls.
