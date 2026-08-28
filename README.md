@@ -36,6 +36,7 @@ run `tikutils` from your terminal or app grid.
 *   **analyzer:** fetch metadata, stats, and resolve unwatermarked origin urls.
 *   **patcher:** re-encodes to **h.265/h.264 crf 18** and patches mp4 structure to force tiktok passthrough.
 *   **downloader:** native save dialogs with progress tracking.
+*   **maximum format:** supports up to 4K@60 FPS! check out [this test video](https://www.tiktok.com/@buwryy/video/7678998280461765910)
 
 ## how it works
 
