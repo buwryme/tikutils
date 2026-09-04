@@ -1,6 +1,6 @@
 """
 TikUtils Backend: Analyzer
-Handles TikTok metadata fetching, origin resolution, and downloading.
+Handles TikTok metadata fetching and downloading.
 """
 import json
 import subprocess
@@ -35,64 +35,6 @@ def fetch_metadata(url: str) -> dict:
     log.debug(f"Raw metadata keys: {list(data.keys())}")
     return data
 
-def resolve_origin(url: str, data: dict) -> dict:
-    """Attempts to find the original, unwatermarked source URL."""
-    log.info("Attempting to resolve origin URL...")
-
-    # 1. Check yt-dlp formats for explicit origin/download tags
-    for f in data.get('formats', []):
-        fid = str(f.get('format_id', '')).lower()
-        note = str(f.get('format_note', '')).lower()
-        if any(k in fid or k in note for k in ('download', 'origin', 'source', 'original')):
-            log.info(f"Origin resolved via yt-dlp format: {f.get('format_id')}")
-            return {'type': 'format', 'value': f.get('format_id')}
-
-    # 2. Fallback to parsing TikTok's web rehydration JSON
-    page_url = fetch_page_origin(url)
-    if page_url:
-        log.info("Origin resolved via web JSON (downloadAddr)")
-        return {'type': 'direct', 'value': page_url}
-
-    log.warning("Origin URL could not be resolved for this video.")
-    return {'type': None, 'value': None}
-
-def fetch_page_origin(url: str) -> str | None:
-    """Scrapes the TikTok webpage to extract downloadAddr from __UNIVERSAL_DATA_FOR_REHYDRATION__."""
-    log.debug("Fetching page HTML for origin extraction...")
-    try:
-        jar = http.cookiejar.CookieJar()
-        opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
-        opener.addheaders = [('User-Agent', UA)]
-
-        # Bootstrap ttwid cookie
-        try:
-            opener.open('https://www.tiktok.com/', timeout=10).read()
-            log.debug("Successfully bootstrapped ttwid cookie.")
-        except Exception as e:
-            log.debug(f"Cookie bootstrap failed (non-fatal): {e}")
-
-        html = opener.open(url, timeout=15).read().decode('utf-8', 'ignore')
-        log.debug(f"Downloaded {len(html)} bytes of HTML.")
-
-        m = re.search(r'<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__"[^>]*>(.*?)</script>', html, re.S)
-        if not m:
-            log.warning("Rehydration JSON script tag not found in HTML.")
-            return None
-
-        payload = json.loads(m.group(1))
-        scope = payload.get('__DEFAULT_SCOPE__', {})
-        detail = scope.get('webapp.video-detail', {}) or {}
-        item = detail.get('itemStruct', {}) or {}
-        video = item.get('video', {}) or {}
-        addr = video.get('downloadAddr')
-
-        if addr:
-            log.debug(f"Extracted raw downloadAddr: {addr[:100]}...")
-        return addr or None
-
-    except Exception as e:
-        log.error(f"Exception during page origin fetch: {e}")
-        return None
 
 def download_ytdlp(url: str, format_selector: str, dest_path: str, progress_cb):
     """Downloads a specific stream using yt-dlp."""

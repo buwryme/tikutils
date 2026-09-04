@@ -117,7 +117,6 @@ def get_unique_streams(formats):
     return unique
 
 def make_save_name(username, suffix):
-    # 10 digit random integer + poster username + quality tag
     clean = re.sub(r'[^A-Za-z0-9_.-]', '', username or 'user')
     return f"{random.randint(10 ** 9, (10 ** 10) - 1)}-{clean}-{suffix}.mp4"
 
@@ -160,8 +159,6 @@ class TikUtilsWindow(Adw.ApplicationWindow):
         about_action.connect("activate", self.on_about)
         self.add_action(about_action)
 
-        # css for the short header progress bars, plus a hard cap on headerbar
-        # height so the auto back button can never be stretched vertically
         css = b"""
         .header-progress {
             min-width: 80px;
@@ -251,7 +248,6 @@ class WelcomePage(Adw.NavigationPage):
         title_lbl.set_halign(Gtk.Align.CENTER)
         box.append(title_lbl)
 
-        # slightly smaller subtitle for visual depth
         sub_lbl = Gtk.Label(label="Choose an action")
         sub_lbl.set_css_classes(["title-4", "dim-label"])
         sub_lbl.set_halign(Gtk.Align.CENTER)
@@ -330,7 +326,6 @@ class PatcherSelectPage(Adw.NavigationPage):
         try:
             file = dialog.open_finish(result)
         except GLib.Error:
-            # user closed the picker without choosing anything
             Log.wrn("video selection cancelled by user")
             self.window.show_toast("Video selection cancelled by user")
             return
@@ -359,43 +354,43 @@ class PatcherSettingsPage(Adw.NavigationPage):
         toolbar_view = Adw.ToolbarView()
 
         header = Adw.HeaderBar()
-
-        # patching activity bar, hidden unless a patch is running.
-        # same class as the analyzer bar so both share the same width.
         self.progress_bar = Gtk.ProgressBar(valign=Gtk.Align.CENTER)
         self.progress_bar.add_css_class("header-progress")
         self.progress_bar.set_visible(False)
         header.pack_end(self.progress_bar)
-
         toolbar_view.add_top_bar(header)
 
         prefs_page = Adw.PreferencesPage()
 
-        # shows which file will be patched
+        # session
         session_group = Adw.PreferencesGroup(title="Session")
         self.file_row = Adw.ActionRow(title="File")
         self.file_row.set_subtitle("no video selected")
         session_group.add(self.file_row)
         prefs_page.add(session_group)
 
-        # metadata group
+        # metadata
         meta_group = Adw.PreferencesGroup(title="Metadata")
         self.entries = {}
-        fields = ["artist", "composer", "album", "comment", "copyright", "grouping"]
-        for field in fields:
-            row = Adw.ActionRow(title=field.capitalize())
+        fields = [
+            ("encoder", "Encoder"),
+            ("comment", "Comment (primary)"),
+            ("comment_short", "Comment (secondary)"),
+            ("name_box_payload", "Name Box Payload"),
+        ]
+        for key, label in fields:
+            row = Adw.ActionRow(title=label)
             entry = Gtk.Entry(valign=Gtk.Align.CENTER)
-            # fixed width so all fields line up symmetrically
             entry.set_size_request(260, -1)
-            entry.set_text(self.config_manager.config.get(field, "buwryy"))
+            entry.set_text(str(self.config_manager.config.get(key, "")))
             entry.connect("changed", self.on_setting_changed)
             row.add_suffix(entry)
             row.set_activatable_widget(entry)
-            self.entries[field] = entry
+            self.entries[key] = entry
             meta_group.add(row)
         prefs_page.add(meta_group)
 
-        # patcher options group
+        # patcher options
         patch_group = Adw.PreferencesGroup(title="Patcher Options")
 
         reenc_row = Adw.ActionRow(title="Re-encode Video")
@@ -407,46 +402,35 @@ class PatcherSettingsPage(Adw.NavigationPage):
         patch_group.add(reenc_row)
 
         codec_row = Adw.ActionRow(title="Codec")
-        codec_row.set_subtitle("Video codec for encoding")
-        codec_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        codec_row.set_subtitle("Video codec for encoding\nH.265 may cause playback issues for viewers.")
         self.codec_combo = Gtk.ComboBoxText()
         self.codec_combo.append("h264", "H.264")
         self.codec_combo.append("h265", "H.265")
-        codec = self.config_manager.config.get("codec", "h265")
-        self.codec_combo.set_active_id(codec)
+        self.codec_combo.set_active_id(self.config_manager.config.get("codec", "h264"))
         self.codec_combo.connect("changed", self.on_setting_changed)
         self.codec_combo.set_size_request(120, -1)
-        codec_box.append(self.codec_combo)
-        codec_row.add_suffix(codec_box)
+        codec_row.add_suffix(self.codec_combo)
         codec_row.set_activatable_widget(self.codec_combo)
         self.codec_row = codec_row
         patch_group.add(codec_row)
 
-        # REPLACED BITRATE ROW WITH CRF ROW
         saved_crf = self.config_manager.config.get("crf", 18)
         crf_row = Adw.ActionRow(title="Quality (CRF)")
         crf_row.set_subtitle("Lower is better quality/larger file (0-51)")
-
         crf_container = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-
-        # CRF Scale: Range 0-51, step 1. Default 18.
         self.crf_scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 51, 1)
         self.crf_scale.set_draw_value(False)
         self.crf_scale.set_value(saved_crf)
         self.crf_scale.set_size_request(260, -1)
         self.crf_scale.set_hexpand(True)
-
         self.crf_label = Gtk.Label(label=f"{saved_crf}")
         self.crf_label.set_size_request(40, -1)
         self.crf_label.set_halign(Gtk.Align.END)
         self.crf_label.add_css_class("numeric")
         self.crf_label.add_css_class("dim-label")
-
         self.crf_scale.connect("value-changed", self.on_crf_changed)
-
         crf_container.append(self.crf_scale)
         crf_container.append(self.crf_label)
-
         crf_row.add_suffix(crf_container)
         crf_row.set_activatable_widget(self.crf_scale)
         self.crf_row = crf_row
@@ -458,7 +442,7 @@ class PatcherSettingsPage(Adw.NavigationPage):
         infl_row.set_subtitle("Multiplier for audio sample table padding")
         self.infl_spin = Gtk.SpinButton.new_with_range(1, 100, 1)
         self.infl_spin.set_valign(Gtk.Align.CENTER)
-        self.infl_spin.set_value(self.config_manager.config.get("inflation_rate", 10))
+        self.infl_spin.set_value(self.config_manager.config.get("inflation_rate", 9))
         self.infl_spin.connect("value-changed", self.on_setting_changed)
         infl_row.add_suffix(self.infl_spin)
         infl_row.set_activatable_widget(self.infl_spin)
@@ -468,7 +452,7 @@ class PatcherSettingsPage(Adw.NavigationPage):
         trail_row.set_subtitle("Junk data appended to confuse validators")
         self.trail_spin = Gtk.SpinButton.new_with_range(0, 1000000, 100)
         self.trail_spin.set_valign(Gtk.Align.CENTER)
-        self.trail_spin.set_value(self.config_manager.config.get("trailing_bytes", 1024))
+        self.trail_spin.set_value(self.config_manager.config.get("trailing_bytes", 33836))
         self.trail_spin.connect("value-changed", self.on_setting_changed)
         trail_row.add_suffix(self.trail_spin)
         trail_row.set_activatable_widget(self.trail_spin)
@@ -477,11 +461,17 @@ class PatcherSettingsPage(Adw.NavigationPage):
         prefs_page.add(patch_group)
         toolbar_view.set_content(prefs_page)
 
-        # bottom bar: save on the left, patch on the right
+        # bottom bar: reset, save, patch
         bottom_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, halign=Gtk.Align.END, spacing=12)
         bottom_bar.set_margin_start(12)
         bottom_bar.set_margin_end(12)
         bottom_bar.set_margin_bottom(12)
+
+        self.reset_btn = Gtk.Button(label="Reset")
+        self.reset_btn.add_css_class("pill")
+        self.reset_btn.add_css_class("destructive-action")
+        self.reset_btn.connect("clicked", self.on_reset_clicked)
+        bottom_bar.append(self.reset_btn)
 
         self.save_btn = Gtk.Button(label="Save")
         self.save_btn.add_css_class("pill")
@@ -504,14 +494,25 @@ class PatcherSettingsPage(Adw.NavigationPage):
 
     def get_current_config(self):
         cfg = self.config_manager.config.copy()
-        for field, entry in self.entries.items():
-            cfg[field] = entry.get_text()
+        for key, entry in self.entries.items():
+            cfg[key] = entry.get_text()
         cfg["re_encode"] = self.reenc_switch.get_active()
         cfg["codec"] = self.codec_combo.get_active_id()
         cfg["crf"] = int(self.crf_scale.get_value())
         cfg["inflation_rate"] = int(self.infl_spin.get_value())
         cfg["trailing_bytes"] = int(self.trail_spin.get_value())
         return cfg
+
+    def apply_config_to_widgets(self, cfg):
+        for key, entry in self.entries.items():
+            entry.set_text(str(cfg.get(key, "")))
+        self.reenc_switch.set_active(cfg.get("re_encode", True))
+        self.codec_combo.set_active_id(cfg.get("codec", "h264"))
+        self.crf_scale.set_value(cfg.get("crf", 18))
+        self.crf_label.set_label(str(cfg.get("crf", 18)))
+        self.infl_spin.set_value(cfg.get("inflation_rate", 9))
+        self.trail_spin.set_value(cfg.get("trailing_bytes", 33836))
+        self.update_encoding_visibility()
 
     def on_crf_changed(self, scale):
         value = int(scale.get_value())
@@ -530,6 +531,13 @@ class PatcherSettingsPage(Adw.NavigationPage):
     def on_setting_changed(self, *args):
         self.save_btn.set_sensitive(self.get_current_config() != self.original_config)
 
+    def on_reset_clicked(self, btn):
+        defaults = self.config_manager.get_defaults()
+        self.apply_config_to_widgets(defaults)
+        self.on_setting_changed()
+        self.window.show_toast("Settings reset to defaults")
+        Log.inf("patcher settings reset to defaults")
+
     def on_save_clicked(self, btn):
         current = self.get_current_config()
         self.config_manager.save(current)
@@ -538,8 +546,6 @@ class PatcherSettingsPage(Adw.NavigationPage):
         self.window.show_toast("Settings saved to disk")
         Log.inf("patcher settings saved")
 
-    # progress bar helpers. ffmpeg gives us no percentage, so we just
-    # pulse the bar left to right every 150ms while the pipeline runs
     def start_pulse(self):
         self.progress_bar.set_visible(True)
         self.progress_bar.set_fraction(0.0)
@@ -560,14 +566,11 @@ class PatcherSettingsPage(Adw.NavigationPage):
         self.progress_bar.set_visible(False)
         self.progress_bar.set_fraction(0.0)
 
-    # patch pipeline: work on a temp copy so the original is never touched,
-    # then hand the finished file to the xdg save portal
     def on_patch_clicked(self, btn):
         if not self.target_path:
             self.window.show_toast("No video selected")
             return
 
-        # read widgets on the main thread before hopping to the worker
         config = self.get_current_config()
         target = self.target_path
 
@@ -584,9 +587,13 @@ class PatcherSettingsPage(Adw.NavigationPage):
             shutil.copy2(target, copy_path)
             Log.inf(f"patching temp copy: {copy_path}")
 
+            from backend.patcher import set_runtime_params
+            set_runtime_params(
+                config.get("inflation_rate", 9),
+                config.get("dummy_sample_size", 8),
+            )
             patch_video(copy_path, config)
 
-            # the backend writes the encoded file next to its input
             if config.get("re_encode", True):
                 result_path = os.path.join(temp_dir, "source_tiktok.mp4")
             else:
@@ -608,7 +615,6 @@ class PatcherSettingsPage(Adw.NavigationPage):
         self.patch_btn.set_sensitive(True)
 
     def on_patch_complete(self, result_path, temp_dir, stem):
-        # work is done, freeze the bar full until the dialog resolves
         self.stop_pulse()
         self.progress_bar.set_fraction(1.0)
 
@@ -617,7 +623,6 @@ class PatcherSettingsPage(Adw.NavigationPage):
         dialog = Gtk.FileDialog.new()
         dialog.set_title("Save Patched Video")
         dialog.set_initial_name(suggested)
-        # the dialog parent must be a window, not a navigation page
         dialog.save(self.window, None, self.on_save_response, (result_path, temp_dir))
 
     def on_save_response(self, dialog, result, user_data):
@@ -692,7 +697,6 @@ class AnalyzerInputPage(Adw.NavigationPage):
     def fetch_data(self, url):
         try:
             data = analyzer.fetch_metadata(url)
-            data['_origin'] = analyzer.resolve_origin(url, data)
             GLib.idle_add(self.on_fetch_done, data)
         except Exception as e:
             Log.err(f"fetch failed: {e}")
@@ -714,7 +718,6 @@ class AnalyzerResultsPage(Adw.NavigationPage):
 
         header = Adw.HeaderBar()
 
-        # download progress, hidden unless something is actively downloading
         self.progress_bar = Gtk.ProgressBar(valign=Gtk.Align.CENTER)
         self.progress_bar.add_css_class("header-progress")
         self.progress_bar.set_visible(False)
@@ -789,17 +792,6 @@ class AnalyzerResultsPage(Adw.NavigationPage):
         # video streams
         streams = Adw.PreferencesGroup(title="Video streams")
 
-        # only show the origin row when a source url was actually resolved
-        origin = info.get('_origin', {'type': None, 'value': None})
-        if origin.get('type'):
-            orig_row = Adw.ActionRow(title="Origin", subtitle="Source video")
-            orig_btn = Gtk.Button(icon_name="folder-download-symbolic")
-            orig_btn.add_css_class("flat")
-            orig_btn.connect("clicked", self.on_download_origin)
-            orig_row.add_suffix(orig_btn)
-            orig_row.set_activatable_widget(orig_btn)
-            streams.add(orig_row)
-
         formats = info.get('formats', [])
         video_formats = [f for f in formats if f.get('width', 0) > 0 and f.get('height', 0) > 0]
 
@@ -823,23 +815,6 @@ class AnalyzerResultsPage(Adw.NavigationPage):
 
         self.results_box.append(streams)
 
-    # downloads
-    def on_download_origin(self, btn):
-        origin = (self.current_info or {}).get('_origin', {'type': None, 'value': None})
-        if not origin.get('type'):
-            Log.wrn("origin download not available for this video")
-            self.window.show_toast("Origin not available for this video")
-            return
-
-        username = (self.current_info or {}).get('uploader', 'user')
-        suggested = make_save_name(username, 'origin')
-
-        if origin['type'] == 'direct':
-            self.start_download(origin['value'], None, suggested, "Origin", direct=True)
-        else:
-            self.start_download((self.current_info or {}).get('webpage_url', ''),
-                                origin['value'], suggested, "Origin")
-
     def on_download_stream(self, btn, format_id, suffix):
         if not self.current_info or not format_id:
             return
@@ -847,18 +822,18 @@ class AnalyzerResultsPage(Adw.NavigationPage):
         self.start_download(self.current_info.get('webpage_url', ''), format_id,
                             suggested, format_id)
 
-    def start_download(self, url, format_selector, suggested_name, label, direct=False):
+    def start_download(self, url, format_selector, suggested_name, label):
         self.progress_bar.set_visible(True)
         self.progress_bar.set_fraction(0.0)
         Log.inf(f"starting download: {label}")
         self.window.show_toast(f"Downloading {label}...")
 
         thread = threading.Thread(target=self.download_to_cache,
-                                  args=(url, format_selector, suggested_name, label, direct),
+                                  args=(url, format_selector, suggested_name, label),
                                   daemon=True)
         thread.start()
 
-    def download_to_cache(self, url, format_selector, suggested_name, label, direct):
+    def download_to_cache(self, url, format_selector, suggested_name, label):
         temp_dir = tempfile.mkdtemp(prefix="tikutils_")
         temp_path = os.path.join(temp_dir, suggested_name)
 
@@ -866,10 +841,7 @@ class AnalyzerResultsPage(Adw.NavigationPage):
             GLib.idle_add(self.progress_bar.set_fraction, frac)
 
         try:
-            if direct:
-                analyzer.download_direct(url, temp_path, update_progress)
-            else:
-                analyzer.download_ytdlp(url, format_selector, temp_path, update_progress)
+            analyzer.download_ytdlp(url, format_selector, temp_path, update_progress)
 
             if os.path.exists(temp_path) and os.path.getsize(temp_path) > 0:
                 Log.inf(f"download complete: {label}")
