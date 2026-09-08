@@ -164,6 +164,10 @@ update-desktop-database "$HOME/.local/share/applications" &> /dev/null || true
 gtk-update-icon-cache -f -t "$HOME/.local/share/icons/hicolor" &> /dev/null || true
 success "Desktop entry installed"
 
+# Clear caches
+find ~/.local/share/net.buwryy.TikUtils -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null
+success "Caches cleared"
+
 echo ""
 echo -e "${GREEN}TikUtils setup complete!${NC}"
 echo "To run: tikutils"

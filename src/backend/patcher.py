@@ -19,7 +19,7 @@ DEFAULTS = {
     "name_box_payload": "buwryy<3",
     "inflation_rate": 9,
     "dummy_sample_size": 8,
-    "trailing_bytes": 33836,
+    "trailing_bytes": 184100,
     "re_encode": True,
     "crf": 18,
     "codec": "h264",
@@ -124,46 +124,46 @@ def build_ilst_entry(tag: bytes, value: str) -> bytes:
 
 
 def build_combined_udta(cfg: dict) -> bytes:
+    # --- meta1 (flags=375): hdlr(appl) + ilst ---
     ilst1 = b''
     tag_map = [
-        ('\xa9nam', ""),
-        ('\xa9ART', ""),
-        ('\xa9wrt', ""),
-        ('\xa9alb', ""),
-        ('\xa9day', ""),
-        ('\xa9too', cfg.get("encoder")),
-        ('\xa9cmt', cfg.get("comment")),
-        ('\xa9gen', ""),
-        ('cprt',    ""),
-        ('\xa9grp', ""),
+        ('\xa9too', cfg.get("encoder", "")),
+        ('\xa9cmt', cfg.get("comment", "")),
     ]
     for tag, val in tag_map:
         if val:
             ilst1 += build_ilst_entry(tag.encode('latin-1'), val)
 
-    meta1_payload = b'\x00\x00\x00\x00' + build_box(b'ilst', ilst1)
-    meta1_box = build_fullbox(b'meta', 0, 375, meta1_payload)
-
     hdlr1_payload = b'\x00' * 4 + b'mdir' + b'\x00' * 12
     hdlr1_payload += b'appl\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'
     hdlr1_box = build_fullbox(b'hdlr', 0, 0, hdlr1_payload)
 
-    ilst2 = b''
-    short_comment = cfg.get("comment_short")
-    if short_comment:
-        ilst2 += build_ilst_entry('\xa9cmt'.encode('latin-1'), short_comment)
+    # hdlr1 goes INSIDE meta1
+    meta1_inner = hdlr1_box + build_box(b'ilst', ilst1)
+    meta1_payload = b'\x00\x00\x00\x00' + meta1_inner
+    meta1_box = build_fullbox(b'meta', 0, 375, meta1_payload)
 
-    meta2_payload = b'\x00\x00\x00\x00' + build_box(b'ilst', ilst2)
-    meta2_box = build_fullbox(b'meta', 0, 0, meta2_payload)
-
+    # --- meta2 (flags=0): hdlr(zeros) + name + ilst(short comment) ---
     hdlr2_payload = b'\x00' * 4 + b'mdir' + b'\x00' * 12
     hdlr2_payload += b'\x00' * 12 + b'\x00'
     hdlr2_box = build_fullbox(b'hdlr', 0, 0, hdlr2_payload)
 
     name_payload = cfg.get("name_box_payload", "").encode('utf-8')
-    name_box = build_box(b'name', name_payload)
+    name_box = build_box(b'name', name_payload) if name_payload else b''
 
-    udta_payload = hdlr1_box + meta1_box + hdlr2_box + name_box + meta2_box
+    ilst2 = b''
+    short_comment = cfg.get("comment_short", "")
+    if short_comment:
+        ilst2 += build_ilst_entry('\xa9cmt'.encode('latin-1'), short_comment)
+    ilst2_box = build_box(b'ilst', ilst2)
+
+    # hdlr2 + name + ilst2 ALL go INSIDE meta2
+    meta2_inner = hdlr2_box + name_box + ilst2_box
+    meta2_payload = b'\x00\x00\x00\x00' + meta2_inner
+    meta2_box = build_fullbox(b'meta', 0, 0, meta2_payload)
+
+    # udta contains ONLY meta1 + meta2
+    udta_payload = meta1_box + meta2_box
     return build_box(b'udta', udta_payload)
 
 
@@ -173,6 +173,34 @@ def build_trailing_garbage(size: int) -> bytes:
     remaining = size - len(void_box)
     repeats = max(0, remaining // len(pattern))
     return void_box + (pattern * repeats)
+
+
+def zero_mp4a_samplerate(data: bytearray):
+    """zero out SampleRate in all mp4a sample entries"""
+    top_boxes = parse_boxes(data, 0, len(data))
+    moov = next((b for b in top_boxes if b["type"] == b'moov'), None)
+    if not moov:
+        return
+    _zero_mp4a_recursive(data, moov["offset"] + 8, moov["end"])
+
+
+def _zero_mp4a_recursive(data: bytearray, start: int, end: int):
+    pos = start
+    while pos + 8 <= end:
+        sz = read_u32be(data, pos)
+        if sz < 8 or pos + sz > end:
+            break
+        typ = data[pos+4:pos+8]
+        if typ == b'mp4a' and sz >= 36:
+            # SampleRate is a 16.16 fixed point at offset 32 within mp4a
+            # (8 header + 6 reserved + 2 data_ref_idx + 8 audio fields + 4 samplerate)
+            # actually: 8(header) + 6(reserved) + 2(dref) + 2(ver) + 2(rev) + 4(vendor)
+            #           + 2(chan) + 2(sampsize) + 2(compression) + 2(pktsize) + 4(samplerate)
+            # = offset 28 from box start for the 4-byte samplerate field
+            write_u32be(data, pos + 28, 0)
+        elif typ in (b'moov', b'trak', b'mdia', b'minf', b'stbl', b'stsd'):
+            _zero_mp4a_recursive(data, pos + 8, pos + sz)
+        pos += sz
 
 
 def patch_video(input_path: str, config: dict = None) -> bool:
@@ -263,8 +291,13 @@ def patch_mp4(input_path: str, cfg: dict) -> bool:
     new_moov_children = []
     for i, child in enumerate(moov_children):
         if child["type"] == b'mvhd':
-            new_moov_children.append(bytes(moov_data[child["offset"]:child["end"]]))
-
+            mvhd = bytearray(moov_data[child["offset"]:child["end"]])
+            # set NextTrackID to 4 (video + audio + cloned audio)
+            # version 0: offset 96, version 1: offset 108
+            version = mvhd[8]
+            ntid_offset = 96 if version == 0 else 108
+            write_u32be(mvhd, ntid_offset, 4)
+            new_moov_children.append(bytes(mvhd))
         elif child["type"] == b'trak':
             trak_data = bytearray(moov_data[child["offset"]:child["end"]])
             if i == tmcd_trak_idx:
@@ -283,11 +316,9 @@ def patch_mp4(input_path: str, cfg: dict) -> bool:
             else:
                 patched = patch_trak(trak_data, is_video, False, inflate=False)
                 new_moov_children.append(bytes(patched))
-
         elif child["type"] == b'udta':
             log.debug("replacing existing udta.")
             continue
-
         else:
             new_moov_children.append(bytes(moov_data[child["offset"]:child["end"]]))
 
@@ -299,13 +330,12 @@ def patch_mp4(input_path: str, cfg: dict) -> bool:
     new_moov = build_box(b'moov', moov_payload)
 
     log.info("[4/6] assembling output...")
-    output_data = bytearray(ftyp_data) + new_moov + mdat_data
+    output_data = bytearray(ftyp_data) + bytearray(new_moov) + mdat_data
 
     log.info("[5/6] fixing chunk offsets...")
     new_mdat_offset = len(ftyp_data) + len(new_moov) + 8
     old_mdat_payload_offset = mdat_box["offset"] + mdat_header_size
     offset_delta = new_mdat_offset - old_mdat_payload_offset
-
     if offset_delta != 0:
         fix_chunk_offsets(output_data, offset_delta)
         log.debug(f"shifted offsets by {offset_delta:+d}")
@@ -314,6 +344,9 @@ def patch_mp4(input_path: str, cfg: dict) -> bool:
     garbage = build_trailing_garbage(cfg.get("trailing_bytes", 33836))
     output_data += garbage
     log.debug(f"appended {len(garbage)} bytes of trailing padding.")
+
+    # post-patch: zero out mp4a sample rate to match compressbase
+    zero_mp4a_samplerate(output_data)
 
     try:
         with open(input_path, 'wb') as f:
@@ -396,7 +429,6 @@ def patch_minf(minf_data: bytearray, is_audio: bool, inflate: bool = False) -> b
 
 
 def patch_stbl(stbl_data: bytearray) -> bytearray:
-    global STSZ_INFLATE_FACTOR, DUMMY_SAMPLE_SIZE
     stbl_children = parse_boxes(stbl_data, 8, len(stbl_data))
 
     stsz_box = stts_box = stsc_box = stco_box = None

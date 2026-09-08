@@ -117,6 +117,7 @@ def get_unique_streams(formats):
     return unique
 
 def make_save_name(username, suffix):
+    # 10 digit random integer + poster username + quality tag
     clean = re.sub(r'[^A-Za-z0-9_.-]', '', username or 'user')
     return f"{random.randint(10 ** 9, (10 ** 10) - 1)}-{clean}-{suffix}.mp4"
 
@@ -159,6 +160,8 @@ class TikUtilsWindow(Adw.ApplicationWindow):
         about_action.connect("activate", self.on_about)
         self.add_action(about_action)
 
+        # css for the short header progress bars, plus a hard cap on headerbar
+        # height so the auto back button can never be stretched vertically
         css = b"""
         .header-progress {
             min-width: 80px;
@@ -248,6 +251,7 @@ class WelcomePage(Adw.NavigationPage):
         title_lbl.set_halign(Gtk.Align.CENTER)
         box.append(title_lbl)
 
+        # slightly smaller subtitle for visual depth
         sub_lbl = Gtk.Label(label="Choose an action")
         sub_lbl.set_css_classes(["title-4", "dim-label"])
         sub_lbl.set_halign(Gtk.Align.CENTER)
@@ -326,6 +330,7 @@ class PatcherSelectPage(Adw.NavigationPage):
         try:
             file = dialog.open_finish(result)
         except GLib.Error:
+            # user closed the picker without choosing anything
             Log.wrn("video selection cancelled by user")
             self.window.show_toast("Video selection cancelled by user")
             return
@@ -354,10 +359,14 @@ class PatcherSettingsPage(Adw.NavigationPage):
         toolbar_view = Adw.ToolbarView()
 
         header = Adw.HeaderBar()
+
+        # patching activity bar, hidden unless a patch is running.
+        # same class as the analyzer bar so both share the same width.
         self.progress_bar = Gtk.ProgressBar(valign=Gtk.Align.CENTER)
         self.progress_bar.add_css_class("header-progress")
         self.progress_bar.set_visible(False)
         header.pack_end(self.progress_bar)
+
         toolbar_view.add_top_bar(header)
 
         prefs_page = Adw.PreferencesPage()
@@ -546,6 +555,8 @@ class PatcherSettingsPage(Adw.NavigationPage):
         self.window.show_toast("Settings saved to disk")
         Log.inf("patcher settings saved")
 
+    # progress bar helpers. ffmpeg gives us no percentage, so we just
+    # pulse the bar left to right every 150ms while the pipeline runs
     def start_pulse(self):
         self.progress_bar.set_visible(True)
         self.progress_bar.set_fraction(0.0)
@@ -566,11 +577,14 @@ class PatcherSettingsPage(Adw.NavigationPage):
         self.progress_bar.set_visible(False)
         self.progress_bar.set_fraction(0.0)
 
+    # patch pipeline: work on a temp copy so the original is never touched,
+    # then hand the finished file to the xdg save portal
     def on_patch_clicked(self, btn):
         if not self.target_path:
             self.window.show_toast("No video selected")
             return
 
+        # read widgets on the main thread before hopping to the worker
         config = self.get_current_config()
         target = self.target_path
 
@@ -594,6 +608,7 @@ class PatcherSettingsPage(Adw.NavigationPage):
             )
             patch_video(copy_path, config)
 
+            # the backend writes the encoded file next to its input
             if config.get("re_encode", True):
                 result_path = os.path.join(temp_dir, "source_tiktok.mp4")
             else:
@@ -615,6 +630,7 @@ class PatcherSettingsPage(Adw.NavigationPage):
         self.patch_btn.set_sensitive(True)
 
     def on_patch_complete(self, result_path, temp_dir, stem):
+        # work is done, freeze the bar full until the dialog resolves
         self.stop_pulse()
         self.progress_bar.set_fraction(1.0)
 
@@ -623,6 +639,7 @@ class PatcherSettingsPage(Adw.NavigationPage):
         dialog = Gtk.FileDialog.new()
         dialog.set_title("Save Patched Video")
         dialog.set_initial_name(suggested)
+        # the dialog parent must be a window, not a navigation page
         dialog.save(self.window, None, self.on_save_response, (result_path, temp_dir))
 
     def on_save_response(self, dialog, result, user_data):
@@ -697,6 +714,7 @@ class AnalyzerInputPage(Adw.NavigationPage):
     def fetch_data(self, url):
         try:
             data = analyzer.fetch_metadata(url)
+            data['_origin'] = analyzer.resolve_origin(url, data)
             GLib.idle_add(self.on_fetch_done, data)
         except Exception as e:
             Log.err(f"fetch failed: {e}")
@@ -718,6 +736,7 @@ class AnalyzerResultsPage(Adw.NavigationPage):
 
         header = Adw.HeaderBar()
 
+        # download progress, hidden unless something is actively downloading
         self.progress_bar = Gtk.ProgressBar(valign=Gtk.Align.CENTER)
         self.progress_bar.add_css_class("header-progress")
         self.progress_bar.set_visible(False)
@@ -792,6 +811,17 @@ class AnalyzerResultsPage(Adw.NavigationPage):
         # video streams
         streams = Adw.PreferencesGroup(title="Video streams")
 
+        # only show the origin row when a source url was actually resolved
+        origin = info.get('_origin', {'type': None, 'value': None})
+        if origin.get('type'):
+            orig_row = Adw.ActionRow(title="Origin", subtitle="Source video")
+            orig_btn = Gtk.Button(icon_name="folder-download-symbolic")
+            orig_btn.add_css_class("flat")
+            orig_btn.connect("clicked", self.on_download_origin)
+            orig_row.add_suffix(orig_btn)
+            orig_row.set_activatable_widget(orig_btn)
+            streams.add(orig_row)
+
         formats = info.get('formats', [])
         video_formats = [f for f in formats if f.get('width', 0) > 0 and f.get('height', 0) > 0]
 
@@ -815,6 +845,23 @@ class AnalyzerResultsPage(Adw.NavigationPage):
 
         self.results_box.append(streams)
 
+    # downloads
+    def on_download_origin(self, btn):
+        origin = (self.current_info or {}).get('_origin', {'type': None, 'value': None})
+        if not origin.get('type'):
+            Log.wrn("origin download not available for this video")
+            self.window.show_toast("Origin not available for this video")
+            return
+
+        username = (self.current_info or {}).get('uploader', 'user')
+        suggested = make_save_name(username, 'origin')
+
+        if origin['type'] == 'direct':
+            self.start_download(origin['value'], None, suggested, "Origin", direct=True)
+        else:
+            self.start_download((self.current_info or {}).get('webpage_url', ''),
+                                origin['value'], suggested, "Origin")
+
     def on_download_stream(self, btn, format_id, suffix):
         if not self.current_info or not format_id:
             return
@@ -822,18 +869,18 @@ class AnalyzerResultsPage(Adw.NavigationPage):
         self.start_download(self.current_info.get('webpage_url', ''), format_id,
                             suggested, format_id)
 
-    def start_download(self, url, format_selector, suggested_name, label):
+    def start_download(self, url, format_selector, suggested_name, label, direct=False):
         self.progress_bar.set_visible(True)
         self.progress_bar.set_fraction(0.0)
         Log.inf(f"starting download: {label}")
         self.window.show_toast(f"Downloading {label}...")
 
         thread = threading.Thread(target=self.download_to_cache,
-                                  args=(url, format_selector, suggested_name, label),
+                                  args=(url, format_selector, suggested_name, label, direct),
                                   daemon=True)
         thread.start()
 
-    def download_to_cache(self, url, format_selector, suggested_name, label):
+    def download_to_cache(self, url, format_selector, suggested_name, label, direct):
         temp_dir = tempfile.mkdtemp(prefix="tikutils_")
         temp_path = os.path.join(temp_dir, suggested_name)
 
@@ -841,7 +888,10 @@ class AnalyzerResultsPage(Adw.NavigationPage):
             GLib.idle_add(self.progress_bar.set_fraction, frac)
 
         try:
-            analyzer.download_ytdlp(url, format_selector, temp_path, update_progress)
+            if direct:
+                analyzer.download_direct(url, temp_path, update_progress)
+            else:
+                analyzer.download_ytdlp(url, format_selector, temp_path, update_progress)
 
             if os.path.exists(temp_path) and os.path.getsize(temp_path) > 0:
                 Log.inf(f"download complete: {label}")
