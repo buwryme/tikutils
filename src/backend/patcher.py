@@ -219,13 +219,13 @@ def patch_video(input_path: str, config: dict = None) -> bool:
         codec = cfg.get("codec", "h264")
         if not encode_for_tiktok(input_path, output_path, crf, codec):
             raise RuntimeError("Encoding failed during execution")
-        target_file = output_path
     else:
-        log.info("step 1/2: skipping re-encode (using original file).")
-        target_file = input_path
+        log.info("step 1/2: remuxing (passthrough, no re-encode)...")
+        if not remux_for_tiktok(input_path, output_path):
+            raise RuntimeError("Remux failed during execution")
 
     log.info("step 2/2: patching mp4 structure...")
-    if not patch_mp4(target_file, cfg):
+    if not patch_mp4(output_path, cfg):
         raise RuntimeError("Patching MP4 structure failed")
 
     log.info("pipeline complete successfully.")
@@ -638,6 +638,34 @@ def encode_for_tiktok(input_path: str, output_path: str, crf: int = 18, codec: s
     log.error("encode failed: output file not created.")
     return False
 
+def remux_for_tiktok(input_path: str, output_path: str) -> bool:
+    """Remux without re-encoding: strips metadata, normalizes handlers, copies streams."""
+    cmd = [
+        "ffmpeg", "-i", input_path,
+        "-c:v", "copy",
+        "-c:a", "copy",
+        "-movflags", "+faststart",
+        "-metadata:s:v", "handler_name=VideoHandler",
+        "-metadata:s:a", "handler_name=SoundHandler",
+        "-map_metadata", "-1",
+        "-y", output_path
+    ]
+
+    log.debug(f"running ffmpeg remux: {' '.join(cmd)}")
+    result = subprocess.run(cmd, capture_output=True, text=True)
+
+    if result.returncode != 0:
+        error_msg = result.stderr[-800:] if len(result.stderr) > 800 else result.stderr
+        log.error(f"ffmpeg remux error:\n{error_msg}")
+        return False
+
+    if os.path.exists(output_path):
+        size_mb = os.path.getsize(output_path) / (1024 * 1024)
+        log.info(f"remuxed successfully ({size_mb:.1f} MB)")
+        return True
+
+    log.error("remux failed: output file not created.")
+    return False
 
 # module-level globals set before patching
 _inflate_factor = DEFAULTS["inflation_rate"]
