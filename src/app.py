@@ -451,7 +451,7 @@ class PatcherSettingsPage(Adw.NavigationPage):
         infl_row.set_subtitle("Multiplier for audio sample table padding")
         self.infl_spin = Gtk.SpinButton.new_with_range(1, 100, 1)
         self.infl_spin.set_valign(Gtk.Align.CENTER)
-        self.infl_spin.set_value(self.config_manager.config.get("inflation_rate", 9))
+        self.infl_spin.set_value(self.config_manager.config.get("inflation_rate", 10))
         self.infl_spin.connect("value-changed", self.on_setting_changed)
         infl_row.add_suffix(self.infl_spin)
         infl_row.set_activatable_widget(self.infl_spin)
@@ -519,7 +519,7 @@ class PatcherSettingsPage(Adw.NavigationPage):
         self.codec_combo.set_active_id(cfg.get("codec", "h264"))
         self.crf_scale.set_value(cfg.get("crf", 18))
         self.crf_label.set_label(str(cfg.get("crf", 18)))
-        self.infl_spin.set_value(cfg.get("inflation_rate", 9))
+        self.infl_spin.set_value(cfg.get("inflation_rate", 10))
         self.trail_spin.set_value(cfg.get("trailing_bytes", 33836))
         self.update_encoding_visibility()
 
@@ -603,16 +603,12 @@ class PatcherSettingsPage(Adw.NavigationPage):
 
             from backend.patcher import set_runtime_params
             set_runtime_params(
-                config.get("inflation_rate", 9),
+                config.get("inflation_rate", 10),
                 config.get("dummy_sample_size", 8),
             )
             patch_video(copy_path, config)
 
-            # the backend writes the encoded file next to its input
-            if config.get("re_encode", True):
-                result_path = os.path.join(temp_dir, "source_tiktok.mp4")
-            else:
-                result_path = copy_path
+            result_path = os.path.join(temp_dir, "source_tiktok.mp4")
 
             if not os.path.exists(result_path) or os.path.getsize(result_path) == 0:
                 raise RuntimeError("patched output missing")

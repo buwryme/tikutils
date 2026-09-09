@@ -17,7 +17,7 @@ DEFAULTS = {
     "comment": "Patched by Buwryme",
     "comment_short": "Patched by Buwryy",
     "name_box_payload": "buwryy<3",
-    "inflation_rate": 9,
+    "inflation_rate": 10,
     "dummy_sample_size": 8,
     "trailing_bytes": 184100,
     "re_encode": True,
@@ -192,15 +192,80 @@ def _zero_mp4a_recursive(data: bytearray, start: int, end: int):
             break
         typ = data[pos+4:pos+8]
         if typ == b'mp4a' and sz >= 36:
-            # SampleRate is a 16.16 fixed point at offset 32 within mp4a
-            # (8 header + 6 reserved + 2 data_ref_idx + 8 audio fields + 4 samplerate)
-            # actually: 8(header) + 6(reserved) + 2(dref) + 2(ver) + 2(rev) + 4(vendor)
-            #           + 2(chan) + 2(sampsize) + 2(compression) + 2(pktsize) + 4(samplerate)
-            # = offset 28 from box start for the 4-byte samplerate field
+            # SampleRate is a 16.16 fixed point at offset 28 within mp4a
+            old = read_u32be(data, pos + 28)
             write_u32be(data, pos + 28, 0)
+            log.info(f"ZEROED mp4a samplerate at offset {pos}: {old} → 0")
         elif typ in (b'moov', b'trak', b'mdia', b'minf', b'stbl', b'stsd'):
             _zero_mp4a_recursive(data, pos + 8, pos + sz)
         pos += sz
+
+
+def copy_avcc_from_source(source_path: str, target_data: bytearray) -> bytearray:
+    """copy raw avcC box from source to target moov/stsd/avc1"""
+    try:
+        with open(source_path, 'rb') as f:
+            src = bytearray(f.read())
+    except IOError as e:
+        log.warning(f"could not read source for avcC copy: {e}")
+        return target_data
+
+    src_moov = find_box(src, b'moov')
+    tgt_moov = find_box(target_data, b'moov')
+    if not src_moov or not tgt_moov:
+        return target_data
+
+    src_avcc = find_box(src, b'avcC', src_moov["offset"], src_moov["end"])
+    tgt_avcc = find_box(target_data, b'avcC', tgt_moov["offset"], tgt_moov["end"])
+    if not src_avcc or not tgt_avcc:
+        return target_data
+
+    if src_avcc["size"] == tgt_avcc["size"]:
+        target_data[tgt_avcc["offset"]:tgt_avcc["end"]] = src[src_avcc["offset"]:src_avcc["end"]]
+        log.debug("copied avcC box from source (same size)")
+    else:
+        log.warning(f"avcC size mismatch: src={src_avcc['size']} tgt={tgt_avcc['size']}, skipping binary copy")
+
+    return target_data
+
+
+def fix_btrt_from_source(source_path: str, target_data: bytearray):
+    """copy btrt avgBitRate from source video trak to target"""
+    try:
+        with open(source_path, 'rb') as f:
+            src = bytearray(f.read())
+    except IOError as e:
+        log.warning(f"could not read source for btrt copy: {e}")
+        return
+
+    src_moov = find_box(src, b'moov')
+    tgt_moov = find_box(target_data, b'moov')
+    if not src_moov or not tgt_moov:
+        return
+
+    src_btrt = find_box(src, b'btrt', src_moov["offset"], src_moov["end"])
+    tgt_btrt = find_box(target_data, b'btrt', tgt_moov["offset"], tgt_moov["end"])
+
+    if src_btrt and tgt_btrt and src_btrt["size"] == tgt_btrt["size"]:
+        # avgBitRate is at offset 12 within btrt box (8 header + 4 bufferSizeDB)
+        avg = read_u32be(src, src_btrt["offset"] + 12)
+        write_u32be(target_data, tgt_btrt["offset"] + 12, avg)
+        log.debug(f"restored btrt avgBitRate: {avg}")
+
+
+def strip_free_boxes(data: bytearray) -> bytearray:
+    """remove all free/skip boxes from top level"""
+    top_boxes = parse_boxes(data, 0, len(data))
+    keep_ranges = []
+    for box in top_boxes:
+        if box["type"] not in (b'free', b'skip'):
+            keep_ranges.append((box["offset"], box["end"]))
+    if len(keep_ranges) == len(top_boxes):
+        return data
+    result = bytearray()
+    for start, end in keep_ranges:
+        result.extend(data[start:end])
+    return result
 
 
 def patch_video(input_path: str, config: dict = None) -> bool:
@@ -225,14 +290,14 @@ def patch_video(input_path: str, config: dict = None) -> bool:
             raise RuntimeError("Remux failed during execution")
 
     log.info("step 2/2: patching mp4 structure...")
-    if not patch_mp4(output_path, cfg):
+    if not patch_mp4(output_path, cfg, input_path):
         raise RuntimeError("Patching MP4 structure failed")
 
     log.info("pipeline complete successfully.")
     return True
 
 
-def patch_mp4(input_path: str, cfg: dict) -> bool:
+def patch_mp4(input_path: str, cfg: dict, source_path: str = None) -> bool:
     try:
         with open(input_path, 'rb') as f:
             raw = f.read()
@@ -244,7 +309,11 @@ def patch_mp4(input_path: str, cfg: dict) -> bool:
     orig_size = len(data)
     log.debug(f"input: {input_path} ({orig_size:,} bytes)")
 
-    log.info("[1/6] parsing box structure...")
+    # restore original avcC if remuxing changed it
+    if source_path and not cfg.get("re_encode", True):
+        data = copy_avcc_from_source(source_path, data)
+
+    log.info("[1/7] parsing box structure...")
     top_boxes = parse_boxes(data, 0, len(data))
 
     ftyp_box = moov_box = mdat_box = None
@@ -261,7 +330,7 @@ def patch_mp4(input_path: str, cfg: dict) -> bool:
     log.debug(f"moov @ {moov_box['offset']} ({moov_box['size']} bytes)")
     log.debug(f"mdat @ {mdat_box['offset']} ({mdat_box['size']} bytes)")
 
-    log.info("[2/6] reconstructing layout (ftyp → moov → mdat)...")
+    log.info("[2/7] reconstructing layout (ftyp → moov → mdat)...")
     ftyp_data = data[ftyp_box["offset"]:ftyp_box["end"]] if ftyp_box else b''
     moov_data = bytearray(data[moov_box["offset"]:moov_box["end"]])
 
@@ -269,7 +338,7 @@ def patch_mp4(input_path: str, cfg: dict) -> bool:
     mdat_payload = data[mdat_box["offset"] + mdat_header_size:mdat_box["end"]]
     mdat_data = build_box(b'mdat', mdat_payload)
 
-    log.info("[3/6] patching moov...")
+    log.info("[3/7] patching moov...")
     moov_children = parse_boxes(moov_data, 8, len(moov_data))
 
     video_trak_idx = audio_trak_idx = tmcd_trak_idx = None
@@ -286,12 +355,16 @@ def patch_mp4(input_path: str, cfg: dict) -> bool:
                             elif ht == b'soun': audio_trak_idx = i
                             elif ht == b'tmcd': tmcd_trak_idx = i
 
-    log.debug(f"video trak: {video_trak_idx}, audio trak: {audio_trak_idx}, tmcd trak: {tmcd_trak_idx}")
+    log.info(f"video trak: {video_trak_idx}, audio trak: {audio_trak_idx}, tmcd trak: {tmcd_trak_idx}")
+    if audio_trak_idx is None:
+        log.error("NO AUDIO TRACK FOUND - inflation will not run!")
 
     new_moov_children = []
     for i, child in enumerate(moov_children):
         if child["type"] == b'mvhd':
             mvhd = bytearray(moov_data[child["offset"]:child["end"]])
+            write_u32be(mvhd, 12, 0)  # CreationTime
+            write_u32be(mvhd, 16, 0)  # ModificationTime
             # set NextTrackID to 4 (video + audio + cloned audio)
             # version 0: offset 96, version 1: offset 108
             version = mvhd[8]
@@ -305,13 +378,15 @@ def patch_mp4(input_path: str, cfg: dict) -> bool:
                 continue
             is_audio = (i == audio_trak_idx)
             is_video = (i == video_trak_idx)
+            log.info(f"TRAK[{i}]: is_audio={is_audio}, is_video={is_video}, inflate_clone={'YES' if is_audio else 'no'}")
             if is_audio:
-                primary = patch_trak(trak_data, is_video, True, inflate=False)
+                primary = patch_trak(trak_data, is_video, True, inflate=False, track_id=2)
                 new_moov_children.append(bytes(primary))
                 log.debug("duplicating audio track for inflation...")
                 clone = bytearray(trak_data)
-                clone_patched = patch_trak(clone, False, True, inflate=True)
+                clone_patched = patch_trak(clone, False, True, inflate=True, track_id=3)
                 new_moov_children.append(bytes(clone_patched))
+                log.info(f"CLONE APPENDED: size={len(clone_patched)}, total_traks={len([c for c in new_moov_children if len(c) > 8 and c[4:8] == b'trak'])}")
                 log.debug("appended inflated audio clone after primary")
             else:
                 patched = patch_trak(trak_data, is_video, False, inflate=False)
@@ -329,10 +404,14 @@ def patch_mp4(input_path: str, cfg: dict) -> bool:
     moov_payload = b''.join(new_moov_children)
     new_moov = build_box(b'moov', moov_payload)
 
-    log.info("[4/6] assembling output...")
+    log.info(f"DIAG: audio_trak_idx={audio_trak_idx}, moov_children count={len(moov_children)}")
+    for idx, ch in enumerate(moov_children):
+        log.info(f"  child[{idx}]: type={ch['type']}")
+
+    log.info("[4/7] assembling output...")
     output_data = bytearray(ftyp_data) + bytearray(new_moov) + mdat_data
 
-    log.info("[5/6] fixing chunk offsets...")
+    log.info("[5/7] fixing chunk offsets...")
     new_mdat_offset = len(ftyp_data) + len(new_moov) + 8
     old_mdat_payload_offset = mdat_box["offset"] + mdat_header_size
     offset_delta = new_mdat_offset - old_mdat_payload_offset
@@ -340,13 +419,32 @@ def patch_mp4(input_path: str, cfg: dict) -> bool:
         fix_chunk_offsets(output_data, offset_delta)
         log.debug(f"shifted offsets by {offset_delta:+d}")
 
-    log.info("[6/6] appending trailing data...")
-    garbage = build_trailing_garbage(cfg.get("trailing_bytes", 33836))
+    log.info("[6/7] post-patch fixes...")
+    # post-patch: zero out mp4a sample rate to match compressbase
+    zero_mp4a_samplerate(output_data)
+
+    # restore btrt avgBitRate from source
+    if source_path:
+        fix_btrt_from_source(source_path, output_data)
+
+    # strip any free/skip boxes ffmpeg may have inserted
+    output_data = strip_free_boxes(output_data)
+
+    log.info("[7/7] appending trailing data...")
+    garbage = build_trailing_garbage(cfg.get("trailing_bytes", 184100))
     output_data += garbage
     log.debug(f"appended {len(garbage)} bytes of trailing padding.")
 
-    # post-patch: zero out mp4a sample rate to match compressbase
-    zero_mp4a_samplerate(output_data)
+    # sanity check: verify nexttrackid=4
+    final_moov = find_box(output_data, b'moov')
+    if final_moov:
+        final_mvhd = find_box(output_data, b'mvhd', final_moov["offset"], final_moov["end"])
+        if final_mvhd:
+            ntid_ver = output_data[final_mvhd["offset"] + 8]
+            ntid_off = 96 if ntid_ver == 0 else 108
+            actual_ntid = read_u32be(output_data, final_mvhd["offset"] + ntid_off)
+            if actual_ntid != 4:
+                log.warning(f"nexttrackid mismatch: expected 4, got {actual_ntid}")
 
     try:
         with open(input_path, 'wb') as f:
@@ -361,21 +459,24 @@ def patch_mp4(input_path: str, cfg: dict) -> bool:
 
 
 def patch_trak(trak_data: bytearray, is_video: bool, is_audio: bool,
-               inflate: bool = False) -> bytearray:
+               inflate: bool = False, track_id: int = 0) -> bytearray:
     trak_children = parse_boxes(trak_data, 8, len(trak_data))
     new_children = []
 
     for tc in trak_children:
         if tc["type"] == b'tkhd':
-            new_children.append(bytes(trak_data[tc["offset"]:tc["end"]]))
+            tkhd = bytearray(trak_data[tc["offset"]:tc["end"]])
+            write_u32be(tkhd, 12, 0)  # CreationTime
+            write_u32be(tkhd, 16, 0)  # ModificationTime
+            if track_id > 0:
+                write_u32be(tkhd, 20, track_id)  # TrackID at offset 20
+            new_children.append(bytes(tkhd))
         elif tc["type"] == b'tref':
             log.debug("stripped tref")
             continue
         elif tc["type"] == b'edts':
-            if is_audio or is_video:
-                log.debug(f"stripped {'audio' if is_audio else 'video'} elst")
-                continue
-            new_children.append(bytes(trak_data[tc["offset"]:tc["end"]]))
+            log.debug("stripped edts/elst")
+            continue
         elif tc["type"] == b'mdia':
             mdia_data = bytearray(trak_data[tc["offset"]:tc["end"]])
             mdia_data = patch_mdia(mdia_data, is_video, is_audio, inflate)
@@ -393,7 +494,10 @@ def patch_mdia(mdia_data: bytearray, is_video: bool, is_audio: bool,
 
     for mc in mdia_children:
         if mc["type"] == b'mdhd':
-            new_children.append(bytes(mdia_data[mc["offset"]:mc["end"]]))
+            mdhd = bytearray(mdia_data[mc["offset"]:mc["end"]])
+            write_u32be(mdhd, 12, 0)  # CreationTime
+            write_u32be(mdhd, 16, 0)  # ModificationTime
+            new_children.append(bytes(mdhd))
         elif mc["type"] == b'hdlr':
             if is_video:
                 new_children.append(build_hdlr(b'vide', "VideoHandler"))
@@ -523,6 +627,7 @@ def patch_stbl(stbl_data: bytearray) -> bytearray:
     for sz in new_sizes:
         new_stsz_payload += struct.pack('>I', sz)
     new_stsz = build_fullbox(b'stsz', 0, 0, new_stsz_payload)
+    log.info(f"INFLATE: factor={inflate_factor}, real_count={real_count}, extra={extra_count}, new_count={new_count}")
     log.debug(f"inflated stsz: {real_count} → {new_count}")
 
     orig_stts_pay = stbl_data[stts_box["offset"] + 12:stts_box["end"]]
@@ -603,12 +708,17 @@ def encode_for_tiktok(input_path: str, output_path: str, crf: int = 18, codec: s
             "-c:v", "libx264", "-preset", "medium",
             "-crf", str(crf), "-level", "4.2",
             "-pix_fmt", "yuv420p",
+            "-g", "9999",
+            "-bf", "0",
+            "-force_key_frames", "0,9.1,18.2",
         ]
     else:
         video_args = [
             "-c:v", "libx265", "-preset", "medium",
             "-crf", str(crf), "-pix_fmt", "yuv420p10le",
             "-x265-params", "log-level=error",
+            "-g", "9999",
+            "-bf", "0",
         ]
 
     cmd = [
@@ -618,7 +728,8 @@ def encode_for_tiktok(input_path: str, output_path: str, crf: int = 18, codec: s
         "-movflags", "+faststart",
         "-metadata:s:v", "handler_name=VideoHandler",
         "-metadata:s:a", "handler_name=SoundHandler",
-        "-map_metadata", "-1",
+        "-map_metadata:s:v", "0:s:v",
+        "-map_metadata:s:a", "0:s:a",
         "-y", output_path
     ]
 
@@ -638,6 +749,7 @@ def encode_for_tiktok(input_path: str, output_path: str, crf: int = 18, codec: s
     log.error("encode failed: output file not created.")
     return False
 
+
 def remux_for_tiktok(input_path: str, output_path: str) -> bool:
     """Remux without re-encoding: strips metadata, normalizes handlers, copies streams."""
     cmd = [
@@ -647,7 +759,10 @@ def remux_for_tiktok(input_path: str, output_path: str) -> bool:
         "-movflags", "+faststart",
         "-metadata:s:v", "handler_name=VideoHandler",
         "-metadata:s:a", "handler_name=SoundHandler",
-        "-map_metadata", "-1",
+        "-map_metadata:s:v", "0:s:v",
+        "-map_metadata:s:a", "0:s:a",
+        "-avoid_negative_ts", "disabled",
+        "-copyinkf",
         "-y", output_path
     ]
 
