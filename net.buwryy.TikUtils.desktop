@@ -1,6 +1,6 @@
 [Desktop Entry]
 Name=TikUtils
-Comment=A TikTok analytics & stream downloader app made with GTK4/Libadwaita
+Comment=A TikTok utilities app made with GTK4/Libadwaita
 Exec=@BINDIR@/tikutils %U
 Icon=net.buwryy.TikUtils
 Terminal=false
