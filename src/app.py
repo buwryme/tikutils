@@ -19,7 +19,6 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Gtk, Adw, Gio, GLib, Gdk
 
-# make sure the backend package next to this file is importable
 sys.path.insert(0, str(Path(__file__).parent))
 from backend import analyzer
 from backend.patcher import ConfigManager, patch_video
@@ -27,7 +26,6 @@ from backend.patcher import ConfigManager, patch_video
 APP_ID = "net.buwryy.TikUtils"
 
 
-# read the version from the VERSION file shipped by setup.sh
 def load_version():
     candidates = [
         Path(__file__).parent / "VERSION",
@@ -43,7 +41,6 @@ def load_version():
 VERSION = load_version()
 
 
-# logging: info to the terminal, everything to a timestamped file
 def setup_logging():
     logger = logging.getLogger("TikUtils")
     logger.setLevel(logging.DEBUG)
@@ -82,7 +79,6 @@ class Log:
     def err(msg): log.error(msg)
 
 
-# small shared helpers
 def codec_name(vcodec):
     if 'avc1' in vcodec:
         return 'h264'
@@ -117,7 +113,6 @@ def get_unique_streams(formats):
     return unique
 
 def make_save_name(username, suffix):
-    # 10 digit random integer + poster username + quality tag
     clean = re.sub(r'[^A-Za-z0-9_.-]', '', username or 'user')
     return f"{random.randint(10 ** 9, (10 ** 10) - 1)}-{clean}-{suffix}.mp4"
 
@@ -144,7 +139,6 @@ class TikUtilsWindow(Adw.ApplicationWindow):
         self.toast_overlay = Adw.ToastOverlay()
         self.set_content(self.toast_overlay)
 
-        # navigation view gives us native slide-in pages and back buttons
         self.nav_view = Adw.NavigationView()
         self.toast_overlay.set_child(self.nav_view)
 
@@ -160,17 +154,10 @@ class TikUtilsWindow(Adw.ApplicationWindow):
         about_action.connect("activate", self.on_about)
         self.add_action(about_action)
 
-        # css for the short header progress bars, plus a hard cap on headerbar
-        # height so the auto back button can never be stretched vertically
         css = b"""
         .header-progress {
             min-width: 80px;
             max-width: 100px;
-        }
-
-        headerbar {
-            min-height: 48px;
-            max-height: 48px;
         }
         """
         provider = Gtk.CssProvider()
@@ -251,7 +238,6 @@ class WelcomePage(Adw.NavigationPage):
         title_lbl.set_halign(Gtk.Align.CENTER)
         box.append(title_lbl)
 
-        # slightly smaller subtitle for visual depth
         sub_lbl = Gtk.Label(label="Choose an action")
         sub_lbl.set_css_classes(["title-4", "dim-label"])
         sub_lbl.set_halign(Gtk.Align.CENTER)
@@ -330,7 +316,6 @@ class PatcherSelectPage(Adw.NavigationPage):
         try:
             file = dialog.open_finish(result)
         except GLib.Error:
-            # user closed the picker without choosing anything
             Log.wrn("video selection cancelled by user")
             self.window.show_toast("Video selection cancelled by user")
             return
@@ -359,118 +344,89 @@ class PatcherSettingsPage(Adw.NavigationPage):
         toolbar_view = Adw.ToolbarView()
 
         header = Adw.HeaderBar()
-
-        # patching activity bar, hidden unless a patch is running.
-        # same class as the analyzer bar so both share the same width.
         self.progress_bar = Gtk.ProgressBar(valign=Gtk.Align.CENTER)
         self.progress_bar.add_css_class("header-progress")
         self.progress_bar.set_visible(False)
         header.pack_end(self.progress_bar)
-
         toolbar_view.add_top_bar(header)
 
         prefs_page = Adw.PreferencesPage()
 
-        # session
+        # session group
         session_group = Adw.PreferencesGroup(title="Session")
         self.file_row = Adw.ActionRow(title="File")
         self.file_row.set_subtitle("no video selected")
         session_group.add(self.file_row)
         prefs_page.add(session_group)
 
-        # metadata
+        # metadata group — using EntryRow per HIG boxed list guidelines
         meta_group = Adw.PreferencesGroup(title="Metadata")
-        self.entries = {}
-        fields = [
-            ("encoder", "Encoder"),
-            ("comment", "Comment (primary)"),
-            ("comment_short", "Comment (secondary)"),
-            ("name_box_payload", "Name Box Payload"),
-        ]
-        for key, label in fields:
-            row = Adw.ActionRow(title=label)
-            entry = Gtk.Entry(valign=Gtk.Align.CENTER)
-            entry.set_size_request(260, -1)
-            entry.set_text(str(self.config_manager.config.get(key, "")))
-            entry.connect("changed", self.on_setting_changed)
-            row.add_suffix(entry)
-            row.set_activatable_widget(entry)
-            self.entries[key] = entry
-            meta_group.add(row)
+
+        self.encoder_row = Adw.EntryRow(title="Encoder")
+        self.encoder_row.set_text(str(self.config_manager.config.get("encoder", "")))
+        self.encoder_row.connect("changed", self.on_setting_changed)
+        meta_group.add(self.encoder_row)
+
+        self.comment_row = Adw.EntryRow(title="Comment (primary)")
+        self.comment_row.set_text(str(self.config_manager.config.get("comment", "")))
+        self.comment_row.connect("changed", self.on_setting_changed)
+        meta_group.add(self.comment_row)
+
+        self.comment_short_row = Adw.EntryRow(title="Comment (secondary)")
+        self.comment_short_row.set_text(str(self.config_manager.config.get("comment_short", "")))
+        self.comment_short_row.connect("changed", self.on_setting_changed)
+        meta_group.add(self.comment_short_row)
+
+        self.name_row = Adw.EntryRow(title="Name Box Payload")
+        self.name_row.set_text(str(self.config_manager.config.get("name_box_payload", "")))
+        self.name_row.connect("changed", self.on_setting_changed)
+        meta_group.add(self.name_row)
+
         prefs_page.add(meta_group)
 
-        # patcher options
+        # patcher options group
         patch_group = Adw.PreferencesGroup(title="Patcher Options")
 
-        reenc_row = Adw.ActionRow(title="Re-encode Video")
-        self.reenc_switch = Gtk.Switch(valign=Gtk.Align.CENTER)
-        self.reenc_switch.set_active(self.config_manager.config.get("re_encode", True))
-        self.reenc_switch.connect("notify::active", self.on_reenc_toggled)
-        reenc_row.add_suffix(self.reenc_switch)
-        reenc_row.set_activatable_widget(self.reenc_switch)
-        patch_group.add(reenc_row)
+        self.reenc_row = Adw.SwitchRow(title="Re-encode Video")
+        self.reenc_row.set_active(self.config_manager.config.get("re_encode", True))
+        self.reenc_row.connect("notify::active", self.on_reenc_toggled)
+        patch_group.add(self.reenc_row)
 
-        codec_row = Adw.ActionRow(title="Codec")
-        codec_row.set_subtitle("Video codec for encoding\nH.265 may cause playback issues for viewers.")
-        self.codec_combo = Gtk.ComboBoxText()
-        self.codec_combo.append("h264", "H.264")
-        self.codec_combo.append("h265", "H.265")
-        self.codec_combo.set_active_id(self.config_manager.config.get("codec", "h264"))
-        self.codec_combo.connect("changed", self.on_setting_changed)
-        self.codec_combo.set_size_request(120, -1)
-        codec_row.add_suffix(self.codec_combo)
-        codec_row.set_activatable_widget(self.codec_combo)
-        self.codec_row = codec_row
-        patch_group.add(codec_row)
+        self.codec_row = Adw.ComboRow(title="Codec")
+        codec_model = Gtk.StringList()
+        codec_model.append("H.264")
+        codec_model.append("H.265")
+        self.codec_row.set_model(codec_model)
+        active_codec = self.config_manager.config.get("codec", "h264")
+        self.codec_row.set_selected(1 if active_codec == "h265" else 0)
+        self.codec_row.connect("notify::selected", self.on_setting_changed)
+        patch_group.add(self.codec_row)
 
         saved_crf = self.config_manager.config.get("crf", 18)
-        crf_row = Adw.ActionRow(title="Quality (CRF)")
-        crf_row.set_subtitle("Lower is better quality/larger file (0-51)")
-        crf_container = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-        self.crf_scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 51, 1)
-        self.crf_scale.set_draw_value(False)
-        self.crf_scale.set_value(saved_crf)
-        self.crf_scale.set_size_request(260, -1)
-        self.crf_scale.set_hexpand(True)
-        self.crf_label = Gtk.Label(label=f"{saved_crf}")
-        self.crf_label.set_size_request(40, -1)
-        self.crf_label.set_halign(Gtk.Align.END)
-        self.crf_label.add_css_class("numeric")
-        self.crf_label.add_css_class("dim-label")
-        self.crf_scale.connect("value-changed", self.on_crf_changed)
-        crf_container.append(self.crf_scale)
-        crf_container.append(self.crf_label)
-        crf_row.add_suffix(crf_container)
-        crf_row.set_activatable_widget(self.crf_scale)
-        self.crf_row = crf_row
-        patch_group.add(crf_row)
+        self.crf_row = Adw.SpinRow(title="Quality (CRF)", adjustment=Gtk.Adjustment(
+            value=saved_crf, lower=0, upper=51, step_increment=1))
+        self.crf_row.set_subtitle("Lower is better quality/larger file")
+        self.crf_row.connect("notify::value", self.on_setting_changed)
+        patch_group.add(self.crf_row)
 
-        self.update_encoding_visibility()
+        self.infl_row = Adw.SpinRow(title="Inflation Factor", adjustment=Gtk.Adjustment(
+            value=self.config_manager.config.get("inflation_rate", 10),
+            lower=1, upper=100, step_increment=1))
+        self.infl_row.set_subtitle("Multiplier for audio sample table padding")
+        self.infl_row.connect("notify::value", self.on_setting_changed)
+        patch_group.add(self.infl_row)
 
-        infl_row = Adw.ActionRow(title="Inflation Factor")
-        infl_row.set_subtitle("Multiplier for audio sample table padding")
-        self.infl_spin = Gtk.SpinButton.new_with_range(1, 100, 1)
-        self.infl_spin.set_valign(Gtk.Align.CENTER)
-        self.infl_spin.set_value(self.config_manager.config.get("inflation_rate", 10))
-        self.infl_spin.connect("value-changed", self.on_setting_changed)
-        infl_row.add_suffix(self.infl_spin)
-        infl_row.set_activatable_widget(self.infl_spin)
-        patch_group.add(infl_row)
-
-        trail_row = Adw.ActionRow(title="Trailing Dummy Bytes")
-        trail_row.set_subtitle("Junk data appended to confuse validators")
-        self.trail_spin = Gtk.SpinButton.new_with_range(0, 1000000, 100)
-        self.trail_spin.set_valign(Gtk.Align.CENTER)
-        self.trail_spin.set_value(self.config_manager.config.get("trailing_bytes", 33836))
-        self.trail_spin.connect("value-changed", self.on_setting_changed)
-        trail_row.add_suffix(self.trail_spin)
-        trail_row.set_activatable_widget(self.trail_spin)
-        patch_group.add(trail_row)
+        self.trail_row = Adw.SpinRow(title="Trailing Dummy Bytes", adjustment=Gtk.Adjustment(
+            value=self.config_manager.config.get("trailing_bytes", 33836),
+            lower=0, upper=1000000, step_increment=100))
+        self.trail_row.set_subtitle("Junk data appended to confuse validators")
+        self.trail_row.connect("notify::value", self.on_setting_changed)
+        patch_group.add(self.trail_row)
 
         prefs_page.add(patch_group)
         toolbar_view.set_content(prefs_page)
 
-        # bottom bar: reset, save, patch
+        # bottom bar with action buttons per HIG pill button guidance
         bottom_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, halign=Gtk.Align.END, spacing=12)
         bottom_bar.set_margin_start(12)
         bottom_bar.set_margin_end(12)
@@ -497,43 +453,43 @@ class PatcherSettingsPage(Adw.NavigationPage):
         toolbar_view.add_bottom_bar(bottom_bar)
         self.set_child(toolbar_view)
 
+        self.update_encoding_visibility()
+
     def set_target(self, path):
         self.target_path = path
         self.file_row.set_subtitle(Path(path).name)
 
     def get_current_config(self):
         cfg = self.config_manager.config.copy()
-        for key, entry in self.entries.items():
-            cfg[key] = entry.get_text()
-        cfg["re_encode"] = self.reenc_switch.get_active()
-        cfg["codec"] = self.codec_combo.get_active_id()
-        cfg["crf"] = int(self.crf_scale.get_value())
-        cfg["inflation_rate"] = int(self.infl_spin.get_value())
-        cfg["trailing_bytes"] = int(self.trail_spin.get_value())
+        cfg["encoder"] = self.encoder_row.get_text()
+        cfg["comment"] = self.comment_row.get_text()
+        cfg["comment_short"] = self.comment_short_row.get_text()
+        cfg["name_box_payload"] = self.name_row.get_text()
+        cfg["re_encode"] = self.reenc_row.get_active()
+        cfg["codec"] = "h265" if self.codec_row.get_selected() == 1 else "h264"
+        cfg["crf"] = int(self.crf_row.get_value())
+        cfg["inflation_rate"] = int(self.infl_row.get_value())
+        cfg["trailing_bytes"] = int(self.trail_row.get_value())
         return cfg
 
     def apply_config_to_widgets(self, cfg):
-        for key, entry in self.entries.items():
-            entry.set_text(str(cfg.get(key, "")))
-        self.reenc_switch.set_active(cfg.get("re_encode", True))
-        self.codec_combo.set_active_id(cfg.get("codec", "h264"))
-        self.crf_scale.set_value(cfg.get("crf", 18))
-        self.crf_label.set_label(str(cfg.get("crf", 18)))
-        self.infl_spin.set_value(cfg.get("inflation_rate", 10))
-        self.trail_spin.set_value(cfg.get("trailing_bytes", 33836))
+        self.encoder_row.set_text(str(cfg.get("encoder", "")))
+        self.comment_row.set_text(str(cfg.get("comment", "")))
+        self.comment_short_row.set_text(str(cfg.get("comment_short", "")))
+        self.name_row.set_text(str(cfg.get("name_box_payload", "")))
+        self.reenc_row.set_active(cfg.get("re_encode", True))
+        self.codec_row.set_selected(1 if cfg.get("codec", "h264") == "h265" else 0)
+        self.crf_row.set_value(cfg.get("crf", 18))
+        self.infl_row.set_value(cfg.get("inflation_rate", 10))
+        self.trail_row.set_value(cfg.get("trailing_bytes", 33836))
         self.update_encoding_visibility()
 
-    def on_crf_changed(self, scale):
-        value = int(scale.get_value())
-        self.crf_label.set_label(f"{value}")
-        GLib.idle_add(self.on_setting_changed)
-
-    def on_reenc_toggled(self, switch, param):
+    def on_reenc_toggled(self, row, param):
         self.update_encoding_visibility()
         self.on_setting_changed()
 
     def update_encoding_visibility(self):
-        is_enabled = self.reenc_switch.get_active()
+        is_enabled = self.reenc_row.get_active()
         self.codec_row.set_visible(is_enabled)
         self.crf_row.set_visible(is_enabled)
 
@@ -555,8 +511,6 @@ class PatcherSettingsPage(Adw.NavigationPage):
         self.window.show_toast("Settings saved to disk")
         Log.inf("patcher settings saved")
 
-    # progress bar helpers. ffmpeg gives us no percentage, so we just
-    # pulse the bar left to right every 150ms while the pipeline runs
     def start_pulse(self):
         self.progress_bar.set_visible(True)
         self.progress_bar.set_fraction(0.0)
@@ -577,14 +531,11 @@ class PatcherSettingsPage(Adw.NavigationPage):
         self.progress_bar.set_visible(False)
         self.progress_bar.set_fraction(0.0)
 
-    # patch pipeline: work on a temp copy so the original is never touched,
-    # then hand the finished file to the xdg save portal
     def on_patch_clicked(self, btn):
         if not self.target_path:
             self.window.show_toast("No video selected")
             return
 
-        # read widgets on the main thread before hopping to the worker
         config = self.get_current_config()
         target = self.target_path
 
@@ -626,7 +577,6 @@ class PatcherSettingsPage(Adw.NavigationPage):
         self.patch_btn.set_sensitive(True)
 
     def on_patch_complete(self, result_path, temp_dir, stem):
-        # work is done, freeze the bar full until the dialog resolves
         self.stop_pulse()
         self.progress_bar.set_fraction(1.0)
 
@@ -635,7 +585,6 @@ class PatcherSettingsPage(Adw.NavigationPage):
         dialog = Gtk.FileDialog.new()
         dialog.set_title("Save Patched Video")
         dialog.set_initial_name(suggested)
-        # the dialog parent must be a window, not a navigation page
         dialog.save(self.window, None, self.on_save_response, (result_path, temp_dir))
 
     def on_save_response(self, dialog, result, user_data):
@@ -731,8 +680,6 @@ class AnalyzerResultsPage(Adw.NavigationPage):
         toolbar_view = Adw.ToolbarView()
 
         header = Adw.HeaderBar()
-
-        # download progress, hidden unless something is actively downloading
         self.progress_bar = Gtk.ProgressBar(valign=Gtk.Align.CENTER)
         self.progress_bar.add_css_class("header-progress")
         self.progress_bar.set_visible(False)
@@ -774,7 +721,6 @@ class AnalyzerResultsPage(Adw.NavigationPage):
         while child := self.results_box.get_first_child():
             self.results_box.remove(child)
 
-        # details
         details = Adw.PreferencesGroup(title="Details")
         cap_row = Adw.ActionRow(title="Caption")
         cap_row.set_subtitle(info.get('description', 'No caption'))
@@ -785,7 +731,6 @@ class AnalyzerResultsPage(Adw.NavigationPage):
         details.add(aud_row)
         self.results_box.append(details)
 
-        # statistics
         stats = Adw.PreferencesGroup(title="Statistics")
         stat_map = [
             ("Views", "view_count"),
@@ -804,10 +749,8 @@ class AnalyzerResultsPage(Adw.NavigationPage):
             stats.add(row)
         self.results_box.append(stats)
 
-        # video streams
         streams = Adw.PreferencesGroup(title="Video streams")
 
-        # only show the origin row when a source url was actually resolved
         origin = info.get('_origin', {'type': None, 'value': None})
         if origin.get('type'):
             orig_row = Adw.ActionRow(title="Origin", subtitle="Source video")
@@ -841,7 +784,6 @@ class AnalyzerResultsPage(Adw.NavigationPage):
 
         self.results_box.append(streams)
 
-    # downloads
     def on_download_origin(self, btn):
         origin = (self.current_info or {}).get('_origin', {'type': None, 'value': None})
         if not origin.get('type'):
@@ -907,7 +849,6 @@ class AnalyzerResultsPage(Adw.NavigationPage):
         dialog = Gtk.FileDialog.new()
         dialog.set_title("Save Video")
         dialog.set_initial_name(suggested_name)
-        # the dialog parent must be a window, not a navigation page
         dialog.save(self.window, None, self.on_save_response, (temp_path, label))
 
     def on_save_response(self, dialog, result, user_data):
