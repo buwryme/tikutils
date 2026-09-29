@@ -25,6 +25,17 @@ def fetch_metadata(url: str) -> dict:
     author = raw.get('author') or raw.get('authorInfo') or {}
     formats = _formats(video)
     upload_source = _inspect_upload_source(video)
+    vq_score = _vq_score(raw, mobile_raw)
+    # Patched/repacked MP4s commonly lose both a usable bitrate and TikTok's
+    # VQ score. Treat that pair as a strong desktop-upload heuristic if the
+    # bounded header probe did not yield a source classification.
+    has_zero_bitrate = any(
+        entry.get('Bitrate') == 0 or entry.get('bit_rate') == 0
+        for entry in (video.get('bitrateInfo') or video.get('bit_rate') or [])
+        if isinstance(entry, dict)
+    ) or (_int(video.get('bitrate')) == 0)
+    if upload_source is None and has_zero_bitrate and vq_score is None:
+        upload_source = 'Desktop'
     info = {
         'id': str(raw.get('id') or video.get('id') or ''),
         'webpage_url': canonical_url,
@@ -47,7 +58,7 @@ def fetch_metadata(url: str) -> dict:
         'thumbnail': video.get('originCover') or video.get('cover'),
         'region_code': raw.get('locationCreated'),
         'upload_source': upload_source,
-        'vq_score': _vq_score(raw, mobile_raw),
+        'vq_score': vq_score,
         'categories': _categories(raw),
         '_tiktok_raw': raw,
         '_tiktok_mobile_raw': mobile_raw,
@@ -514,7 +525,7 @@ def _quality_label(raw: dict):
     quality = str(resolution)
     if fps:
         quality += f" at {fps} FPS"
-    if bitrate:
+    if bitrate and _int(bitrate) and _int(bitrate) > 0:
         quality += f", {bitrate / 1_000_000:.1f}Mbps"
     return quality
 

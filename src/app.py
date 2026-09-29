@@ -851,9 +851,18 @@ class AnalyzerResultsPage(Adw.NavigationPage):
             vcodec = codec_name(f.get('vcodec', 'unknown'))
             tbr = f.get('tbr') or 0
 
-            row = Adw.ActionRow(title=f"{resolution_string(width, height, fps)} • {vcodec.upper()}")
+            stream_title = resolution_string(width, height, fps)
+            if vcodec != 'unknown':
+                stream_title += f" • {vcodec.upper()}"
+            row = Adw.ActionRow(title=stream_title)
             self._add_row_icon(row, "camera-video-symbolic")
-            row.set_subtitle(f"{format_bytes(f.get('filesize', 0))} • {format_bitrate(tbr * 1000)}")
+            stream_details = []
+            if f.get('filesize'):
+                stream_details.append(format_bytes(f['filesize']))
+            if tbr and tbr > 0:
+                stream_details.append(format_bitrate(tbr * 1000))
+            if stream_details:
+                row.set_subtitle(" • ".join(stream_details))
 
             if f is best_stream:
                 best_pill = Gtk.Label(label="BEST")
