@@ -67,6 +67,14 @@ def write_u32be(data: bytearray, offset: int, value: int):
     struct.pack_into('>I', data, offset, value & 0xFFFFFFFF)
 
 
+def read_u64be(data: bytes | bytearray, offset: int) -> int:
+    return struct.unpack('>Q', data[offset:offset+8])[0]
+
+
+def write_u64be(data: bytearray, offset: int, value: int):
+    struct.pack_into('>Q', data, offset, value & 0xFFFFFFFFFFFFFFFF)
+
+
 def parse_boxes(data: bytearray, start: int, end: int) -> list[dict]:
     boxes = []
     pos = start
@@ -127,8 +135,16 @@ def build_combined_udta(cfg: dict) -> bytes:
     # --- meta1 (flags=375): hdlr(appl) + ilst ---
     ilst1 = b''
     tag_map = [
+        ('\xa9nam', cfg.get("title", "")),
+        ('\xa9ART', cfg.get("artist", "")),
+        ('\xa9wrt', cfg.get("composer", "")),
+        ('\xa9alb', cfg.get("album", "")),
+        ('\xa9day', cfg.get("date", "")),
         ('\xa9too', cfg.get("encoder", "")),
         ('\xa9cmt', cfg.get("comment", "")),
+        ('\xa9gen', cfg.get("genre", "")),
+        ('cprt', cfg.get("copyright", "")),
+        ('\xa9grp', cfg.get("grouping", "")),
     ]
     for tag, val in tag_map:
         if val:
@@ -138,7 +154,6 @@ def build_combined_udta(cfg: dict) -> bytes:
     hdlr1_payload += b'appl\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'
     hdlr1_box = build_fullbox(b'hdlr', 0, 0, hdlr1_payload)
 
-    # hdlr1 goes INSIDE meta1
     meta1_inner = hdlr1_box + build_box(b'ilst', ilst1)
     meta1_payload = b'\x00\x00\x00\x00' + meta1_inner
     meta1_box = build_fullbox(b'meta', 0, 375, meta1_payload)
@@ -157,12 +172,10 @@ def build_combined_udta(cfg: dict) -> bytes:
         ilst2 += build_ilst_entry('\xa9cmt'.encode('latin-1'), short_comment)
     ilst2_box = build_box(b'ilst', ilst2)
 
-    # hdlr2 + name + ilst2 ALL go INSIDE meta2
     meta2_inner = hdlr2_box + name_box + ilst2_box
     meta2_payload = b'\x00\x00\x00\x00' + meta2_inner
     meta2_box = build_fullbox(b'meta', 0, 0, meta2_payload)
 
-    # udta contains ONLY meta1 + meta2
     udta_payload = meta1_box + meta2_box
     return build_box(b'udta', udta_payload)
 
@@ -192,13 +205,93 @@ def _zero_mp4a_recursive(data: bytearray, start: int, end: int):
             break
         typ = data[pos+4:pos+8]
         if typ == b'mp4a' and sz >= 36:
-            # SampleRate is a 16.16 fixed point at offset 28 within mp4a
             old = read_u32be(data, pos + 28)
             write_u32be(data, pos + 28, 0)
             log.info(f"ZEROED mp4a samplerate at offset {pos}: {old} → 0")
         elif typ in (b'moov', b'trak', b'mdia', b'minf', b'stbl', b'stsd'):
             _zero_mp4a_recursive(data, pos + 8, pos + sz)
         pos += sz
+
+
+def spoof_audio_bitrate(data: bytearray, source_path: str):
+    """copy esds avgBitrate/maxBitrate and mp4a-btrt from source to all target mp4a entries"""
+    try:
+        with open(source_path, 'rb') as f:
+            src = bytearray(f.read())
+    except IOError as e:
+        log.warning(f"could not read source for bitrate spoof: {e}")
+        return
+
+    src_moov = find_box(src, b'moov')
+    if not src_moov:
+        return
+
+    src_bitrates = []
+    _extract_mp4a_bitrates(src, src_moov["offset"] + 8, src_moov["end"], src_bitrates)
+    if not src_bitrates:
+        log.warning("no mp4a bitrate info found in source")
+        return
+    src_avg, src_max = src_bitrates[0]
+    log.debug(f"source audio bitrate: avg={src_avg}, max={src_max}")
+
+    tgt_moov = find_box(data, b'moov')
+    if not tgt_moov:
+        return
+    count = _apply_mp4a_bitrates(data, tgt_moov["offset"] + 8, tgt_moov["end"], src_avg, src_max)
+    log.info(f"spoofed audio bitrate on {count} mp4a entries (avg={src_avg}, max={src_max})")
+
+
+def _extract_mp4a_bitrates(data: bytearray, start: int, end: int, results: list):
+    pos = start
+    while pos + 8 <= end:
+        sz = read_u32be(data, pos)
+        if sz < 8 or pos + sz > end:
+            break
+        typ = data[pos+4:pos+8]
+        if typ == b'mp4a' and sz >= 36:
+            cpos = pos + 36
+            while cpos + 8 <= pos + sz:
+                csz = read_u32be(data, cpos)
+                if csz < 8 or cpos + csz > pos + sz:
+                    break
+                ctyp = data[cpos+4:cpos+8]
+                if ctyp == b'esds' and csz >= 30:
+                    max_br = read_u32be(data, cpos + 22)
+                    avg_br = read_u32be(data, cpos + 26)
+                    results.append((avg_br, max_br))
+                cpos += csz
+        elif typ in (b'moov', b'trak', b'mdia', b'minf', b'stbl', b'stsd'):
+            _extract_mp4a_bitrates(data, pos + 8, pos + sz, results)
+        pos += sz
+
+
+def _apply_mp4a_bitrates(data: bytearray, start: int, end: int, avg: int, mx: int) -> int:
+    count = 0
+    pos = start
+    while pos + 8 <= end:
+        sz = read_u32be(data, pos)
+        if sz < 8 or pos + sz > end:
+            break
+        typ = data[pos+4:pos+8]
+        if typ == b'mp4a' and sz >= 36:
+            cpos = pos + 36
+            while cpos + 8 <= pos + sz:
+                csz = read_u32be(data, cpos)
+                if csz < 8 or cpos + csz > pos + sz:
+                    break
+                ctyp = data[cpos+4:cpos+8]
+                if ctyp == b'esds' and csz >= 30:
+                    write_u32be(data, cpos + 22, mx)
+                    write_u32be(data, cpos + 26, avg)
+                    count += 1
+                elif ctyp == b'btrt' and csz >= 20:
+                    write_u32be(data, cpos + 12, avg)
+                    write_u32be(data, cpos + 16, mx)
+                cpos += csz
+        elif typ in (b'moov', b'trak', b'mdia', b'minf', b'stbl', b'stsd'):
+            count += _apply_mp4a_bitrates(data, pos + 8, pos + sz, avg, mx)
+        pos += sz
+    return count
 
 
 def copy_avcc_from_source(source_path: str, target_data: bytearray) -> bytearray:
@@ -247,7 +340,6 @@ def fix_btrt_from_source(source_path: str, target_data: bytearray):
     tgt_btrt = find_box(target_data, b'btrt', tgt_moov["offset"], tgt_moov["end"])
 
     if src_btrt and tgt_btrt and src_btrt["size"] == tgt_btrt["size"]:
-        # avgBitRate is at offset 12 within btrt box (8 header + 4 bufferSizeDB)
         avg = read_u32be(src, src_btrt["offset"] + 12)
         write_u32be(target_data, tgt_btrt["offset"] + 12, avg)
         log.debug(f"restored btrt avgBitRate: {avg}")
@@ -266,6 +358,51 @@ def strip_free_boxes(data: bytearray) -> bytearray:
     for start, end in keep_ranges:
         result.extend(data[start:end])
     return result
+
+
+def upgrade_mvhd_to_v1(mvhd: bytearray) -> bytearray:
+    """convert mvhd to version 1 with unknown duration and nexttrackid=5"""
+    ver = mvhd[8]
+    timescale = read_u32be(mvhd, 20) if ver == 0 else read_u32be(mvhd, 28)
+    ntid_off = 96 if ver == 0 else 108
+    ntid = read_u32be(mvhd, ntid_off)
+
+    # v1 mvhd body is 112 bytes INCLUDING the 4-byte version/flags prefix
+    body = bytearray(112)
+    body[0] = 1  # version=1, flags=0x000000
+    # creation_time @ 4 = 0 (already zero)
+    # modification_time @ 12 = 0
+    struct.pack_into('>I', body, 20, timescale)
+    struct.pack_into('>Q', body, 24, 0xFFFFFFFFFFFFFFFF)
+    struct.pack_into('>I', body, 32, 0x00010000)
+    struct.pack_into('>H', body, 36, 0x0100)
+    struct.pack_into('>I', body, 44, 0x00010000)
+    struct.pack_into('>I', body, 60, 0x00010000)
+    struct.pack_into('>I', body, 76, 0x40000000)
+    struct.pack_into('>I', body, 108, 5)
+
+    # use build_box, NOT build_fullbox — version byte is already in body
+    return bytearray(build_box(b'mvhd', bytes(body)))
+
+
+def patch_elst_plus_one(edts_data: bytearray) -> bytearray:
+    """increment first elst segment_duration by 1 tick"""
+    children = parse_boxes(edts_data, 8, len(edts_data))
+    new_children = []
+    for c in children:
+        if c["type"] == b'elst':
+            elst = bytearray(edts_data[c["offset"]:c["end"]])
+            ver = elst[8]
+            count = read_u32be(elst, 12)
+            if count > 0:
+                dur_off = 16 if ver == 0 else 20
+                dur = read_u32be(elst, dur_off)
+                write_u32be(elst, dur_off, dur + 1)
+                log.debug(f"elst segment_duration: {dur} → {dur+1}")
+            new_children.append(bytes(elst))
+        else:
+            new_children.append(bytes(edts_data[c["offset"]:c["end"]]))
+    return bytearray(build_box(b'edts', b''.join(new_children)))
 
 
 def patch_video(input_path: str, config: dict = None) -> bool:
@@ -309,7 +446,6 @@ def patch_mp4(input_path: str, cfg: dict, source_path: str = None) -> bool:
     orig_size = len(data)
     log.debug(f"input: {input_path} ({orig_size:,} bytes)")
 
-    # restore original avcC if remuxing changed it
     if source_path and not cfg.get("re_encode", True):
         data = copy_avcc_from_source(source_path, data)
 
@@ -363,33 +499,28 @@ def patch_mp4(input_path: str, cfg: dict, source_path: str = None) -> bool:
     for i, child in enumerate(moov_children):
         if child["type"] == b'mvhd':
             mvhd = bytearray(moov_data[child["offset"]:child["end"]])
-            write_u32be(mvhd, 12, 0)  # CreationTime
-            write_u32be(mvhd, 16, 0)  # ModificationTime
-            # set NextTrackID to 4 (video + audio + cloned audio)
-            # version 0: offset 96, version 1: offset 108
-            version = mvhd[8]
-            ntid_offset = 96 if version == 0 else 108
-            write_u32be(mvhd, ntid_offset, 4)
+            mvhd = upgrade_mvhd_to_v1(mvhd)
             new_moov_children.append(bytes(mvhd))
         elif child["type"] == b'trak':
             trak_data = bytearray(moov_data[child["offset"]:child["end"]])
-            if i == tmcd_trak_idx:
-                log.debug("stripped tmcd track.")
-                continue
+            is_tmcd = (i == tmcd_trak_idx)
             is_audio = (i == audio_trak_idx)
             is_video = (i == video_trak_idx)
-            log.info(f"TRAK[{i}]: is_audio={is_audio}, is_video={is_video}, inflate_clone={'YES' if is_audio else 'no'}")
+            log.info(f"TRAK[{i}]: is_audio={is_audio}, is_video={is_video}, is_tmcd={is_tmcd}, inflate_clone={'YES' if is_audio else 'no'}")
             if is_audio:
-                primary = patch_trak(trak_data, is_video, True, inflate=False, track_id=2)
+                primary = patch_trak(trak_data, is_video, True, inflate=False, track_id=2, is_clone=False)
                 new_moov_children.append(bytes(primary))
                 log.debug("duplicating audio track for inflation...")
                 clone = bytearray(trak_data)
-                clone_patched = patch_trak(clone, False, True, inflate=True, track_id=3)
+                clone_patched = patch_trak(clone, False, True, inflate=True, track_id=4, is_clone=True)
                 new_moov_children.append(bytes(clone_patched))
                 log.info(f"CLONE APPENDED: size={len(clone_patched)}, total_traks={len([c for c in new_moov_children if len(c) > 8 and c[4:8] == b'trak'])}")
                 log.debug("appended inflated audio clone after primary")
+            elif is_tmcd:
+                patched = patch_trak(trak_data, False, False, inflate=False, track_id=3, is_clone=False)
+                new_moov_children.append(bytes(patched))
             else:
-                patched = patch_trak(trak_data, is_video, False, inflate=False)
+                patched = patch_trak(trak_data, is_video, False, inflate=False, track_id=1, is_clone=False)
                 new_moov_children.append(bytes(patched))
         elif child["type"] == b'udta':
             log.debug("replacing existing udta.")
@@ -420,14 +551,12 @@ def patch_mp4(input_path: str, cfg: dict, source_path: str = None) -> bool:
         log.debug(f"shifted offsets by {offset_delta:+d}")
 
     log.info("[6/7] post-patch fixes...")
-    # post-patch: zero out mp4a sample rate to match compressbase
     zero_mp4a_samplerate(output_data)
 
-    # restore btrt avgBitRate from source
     if source_path:
+        spoof_audio_bitrate(output_data, source_path)
         fix_btrt_from_source(source_path, output_data)
 
-    # strip any free/skip boxes ffmpeg may have inserted
     output_data = strip_free_boxes(output_data)
 
     log.info("[7/7] appending trailing data...")
@@ -435,7 +564,6 @@ def patch_mp4(input_path: str, cfg: dict, source_path: str = None) -> bool:
     output_data += garbage
     log.debug(f"appended {len(garbage)} bytes of trailing padding.")
 
-    # sanity check: verify nexttrackid=4
     final_moov = find_box(output_data, b'moov')
     if final_moov:
         final_mvhd = find_box(output_data, b'mvhd', final_moov["offset"], final_moov["end"])
@@ -443,8 +571,8 @@ def patch_mp4(input_path: str, cfg: dict, source_path: str = None) -> bool:
             ntid_ver = output_data[final_mvhd["offset"] + 8]
             ntid_off = 96 if ntid_ver == 0 else 108
             actual_ntid = read_u32be(output_data, final_mvhd["offset"] + ntid_off)
-            if actual_ntid != 4:
-                log.warning(f"nexttrackid mismatch: expected 4, got {actual_ntid}")
+            if actual_ntid != 5:
+                log.warning(f"nexttrackid mismatch: expected 5, got {actual_ntid}")
 
     try:
         with open(input_path, 'wb') as f:
@@ -459,24 +587,39 @@ def patch_mp4(input_path: str, cfg: dict, source_path: str = None) -> bool:
 
 
 def patch_trak(trak_data: bytearray, is_video: bool, is_audio: bool,
-               inflate: bool = False, track_id: int = 0) -> bytearray:
+               inflate: bool = False, track_id: int = 0, is_clone: bool = False) -> bytearray:
     trak_children = parse_boxes(trak_data, 8, len(trak_data))
     new_children = []
 
     for tc in trak_children:
         if tc["type"] == b'tkhd':
             tkhd = bytearray(trak_data[tc["offset"]:tc["end"]])
-            write_u32be(tkhd, 12, 0)  # CreationTime
-            write_u32be(tkhd, 16, 0)  # ModificationTime
+            ver = tkhd[8]
+            if ver == 0:
+                write_u32be(tkhd, 12, 0)
+                write_u32be(tkhd, 16, 0)
+            else:
+                write_u64be(tkhd, 12, 0)
+                write_u64be(tkhd, 20, 0)
             if track_id > 0:
-                write_u32be(tkhd, 20, track_id)  # TrackID at offset 20
+                tid_off = 20 if ver == 0 else 28
+                write_u32be(tkhd, tid_off, track_id)
             new_children.append(bytes(tkhd))
         elif tc["type"] == b'tref':
-            log.debug("stripped tref")
-            continue
+            if is_clone:
+                log.debug("stripped tref on clone")
+                continue
+            new_children.append(bytes(trak_data[tc["offset"]:tc["end"]]))
         elif tc["type"] == b'edts':
-            log.debug("stripped edts/elst")
-            continue
+            if is_clone:
+                log.debug("stripped edts/elst on clone")
+                continue
+            if is_video:
+                edts_data = bytearray(trak_data[tc["offset"]:tc["end"]])
+                edts_data = patch_elst_plus_one(edts_data)
+                new_children.append(bytes(edts_data))
+            else:
+                new_children.append(bytes(trak_data[tc["offset"]:tc["end"]]))
         elif tc["type"] == b'mdia':
             mdia_data = bytearray(trak_data[tc["offset"]:tc["end"]])
             mdia_data = patch_mdia(mdia_data, is_video, is_audio, inflate)
@@ -495,8 +638,13 @@ def patch_mdia(mdia_data: bytearray, is_video: bool, is_audio: bool,
     for mc in mdia_children:
         if mc["type"] == b'mdhd':
             mdhd = bytearray(mdia_data[mc["offset"]:mc["end"]])
-            write_u32be(mdhd, 12, 0)  # CreationTime
-            write_u32be(mdhd, 16, 0)  # ModificationTime
+            ver = mdhd[8]
+            if ver == 0:
+                write_u32be(mdhd, 12, 0)
+                write_u32be(mdhd, 16, 0)
+            else:
+                write_u64be(mdhd, 12, 0)
+                write_u64be(mdhd, 20, 0)
             new_children.append(bytes(mdhd))
         elif mc["type"] == b'hdlr':
             if is_video:
