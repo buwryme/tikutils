@@ -35,10 +35,10 @@ run `tikutils` from your terminal or app grid.
 *   **analyzer:** fetch public video metadata and stream URLs directly from TikTok.
 *   **patcher:** re-encodes to **h.264/h.265** and patches mp4 structure to force tiktok passthrough.
 *   **downloader:** native save dialogs with progress tracking.
-*   **maximum format:** supports any resolution! check out [this 4K60FPS test video](https://www.tiktok.com/@buwryy/video/7678998280461765910)
+*   **maximum format:** supports any resolution and FPS! check out [this 4K60FPS test video](https://www.tiktok.com/@buwryy/video/7678998280461765910)
 
 > [!IMPORTANT]
-> playback for viewers is best up to 1080p60fps. higher resolutions may cause streaming issues
+> playback for viewers is best up to 1080p60fps. higher resolutions/bitrates may cause streaming issues
 
 ## how it works
 
