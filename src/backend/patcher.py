@@ -233,7 +233,7 @@ def detect_video_codec(data: bytearray) -> bytes:
                         # first child of stsd is the sample entry
                         entries = parse_boxes(data, stsd["offset"] + 8, stsd["end"])
                         if entries:
-                            codec = entries[0]["type"]
+                            codec = bytes(entries[0]["type"])
                             log.info(f"detected video codec: {codec.decode('ascii', errors='replace')}")
                             return codec
     return b'avc1'
