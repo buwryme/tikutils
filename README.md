@@ -17,7 +17,7 @@ gtk4/libadwaita tiktok analytics & lossless stream patcher for linux
 
 ## requirements
 - python 3.10+
-- ffmpeg & yt-dlp (in `$PATH`)
+- ffmpeg (in `$PATH`)
 - gtk4 & libadwaita
 
 ## usage
@@ -32,7 +32,7 @@ run `tikutils` from your terminal or app grid.
 
 ## features
 
-*   **analyzer:** fetch metadata, stats, and resolve unwatermarked origin urls.
+*   **analyzer:** fetch public video metadata and stream URLs directly from TikTok.
 *   **patcher:** re-encodes to **h.264/h.265** and patches mp4 structure to force tiktok passthrough.
 *   **downloader:** native save dialogs with progress tracking.
 *   **maximum format:** supports any resolution! check out [this 4K60FPS test video](https://www.tiktok.com/@buwryy/video/7678998280461765910)

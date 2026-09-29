@@ -32,18 +32,15 @@ info "════════════════════════�
 
 # Detect package manager and install missing dependencies
 install_deps() {
-    local pkgs_ytdlp=""
     local pkgs_ffmpeg=""
     local pkgs_gtk=""
 
     if command -v apt-get &> /dev/null; then
         info "Detected apt-get (Debian/Ubuntu)"
-        pkgs_ytdlp="yt-dlp"
         pkgs_ffmpeg="ffmpeg"
         pkgs_gtk="python3-gi python3-gi-cairo gir1.2-gtk-4.0 gir1.2-adw-1"
 
         local to_install=()
-        command -v yt-dlp &> /dev/null || to_install+=($pkgs_ytdlp)
         command -v ffmpeg &> /dev/null || to_install+=($pkgs_ffmpeg)
         python3 -c "import gi; gi.require_version('Gtk', '4.0'); gi.require_version('Adw', '1')" &> /dev/null || to_install+=($pkgs_gtk)
 
@@ -54,12 +51,10 @@ install_deps() {
 
     elif command -v pacman &> /dev/null; then
         info "Detected pacman (Arch Linux)"
-        pkgs_ytdlp="yt-dlp"
         pkgs_ffmpeg="ffmpeg"
         pkgs_gtk="python-gobject gtk4 libadwaita"
 
         local to_install=()
-        command -v yt-dlp &> /dev/null || to_install+=($pkgs_ytdlp)
         command -v ffmpeg &> /dev/null || to_install+=($pkgs_ffmpeg)
         python3 -c "import gi; gi.require_version('Gtk', '4.0'); gi.require_version('Adw', '1')" &> /dev/null || to_install+=($pkgs_gtk)
 
@@ -70,12 +65,10 @@ install_deps() {
 
     elif command -v dnf &> /dev/null; then
         info "Detected dnf (Fedora)"
-        pkgs_ytdlp="yt-dlp"
         pkgs_ffmpeg="ffmpeg"
         pkgs_gtk="python3-gobject gtk4 libadwaita"
 
         local to_install=()
-        command -v yt-dlp &> /dev/null || to_install+=($pkgs_ytdlp)
         command -v ffmpeg &> /dev/null || to_install+=($pkgs_ffmpeg)
         python3 -c "import gi; gi.require_version('Gtk', '4.0'); gi.require_version('Adw', '1')" &> /dev/null || to_install+=($pkgs_gtk)
 
@@ -86,12 +79,10 @@ install_deps() {
 
     elif command -v zypper &> /dev/null; then
         info "Detected zypper (openSUSE)"
-        pkgs_ytdlp="yt-dlp"
         pkgs_ffmpeg="ffmpeg"
         pkgs_gtk="python3-gobject gtk4 libadwaita-1-0 typelib-1_0-Adw-1"
 
         local to_install=()
-        command -v yt-dlp &> /dev/null || to_install+=($pkgs_ytdlp)
         command -v ffmpeg &> /dev/null || to_install+=($pkgs_ffmpeg)
         python3 -c "import gi; gi.require_version('Gtk', '4.0'); gi.require_version('Adw', '1')" &> /dev/null || to_install+=($pkgs_gtk)
 
@@ -101,7 +92,7 @@ install_deps() {
         fi
     else
         warn "No supported package manager found (apt, pacman, dnf, zypper)."
-        warn "Please ensure yt-dlp, ffmpeg, and GTK4/Libadwaita Python bindings are installed manually."
+        warn "Please ensure ffmpeg and GTK4/Libadwaita Python bindings are installed manually."
     fi
 }
 
@@ -109,7 +100,7 @@ install_deps
 
 # Final verification
 echo ""
-for cmd in yt-dlp ffmpeg; do
+for cmd in ffmpeg; do
     if command -v $cmd &> /dev/null; then
         success "$cmd is installed"
     else

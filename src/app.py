@@ -105,8 +105,9 @@ def format_bitrate(bps):
 def get_unique_streams(formats):
     seen = set()
     unique = []
-    for f in formats:
-        sig = f"{min(f.get('width', 0), f.get('height', 0))}p{f.get('fps', 0)}_{f.get('filesize', 0)}"
+    for f in sorted(formats, key=analyzer.stream_rank, reverse=True):
+        sig = (f.get('width'), f.get('height'), f.get('fps'),
+               f.get('tbr') or f.get('vbr') or 0, f.get('filesize'))
         if sig not in seen:
             seen.add(sig)
             unique.append(f)
@@ -158,6 +159,13 @@ class TikUtilsWindow(Adw.ApplicationWindow):
         .header-progress {
             min-width: 80px;
             max-width: 100px;
+        }
+        .best-stream-pill {
+            background-color: @accent_bg_color;
+            color: @accent_fg_color;
+            border-radius: 9999px;
+            padding: 2px 8px;
+            font-weight: bold;
         }
         """
         provider = Gtk.CssProvider()
@@ -659,7 +667,6 @@ class AnalyzerInputPage(Adw.NavigationPage):
     def fetch_data(self, url):
         try:
             data = analyzer.fetch_metadata(url)
-            data['_origin'] = analyzer.resolve_origin(url, data)
             GLib.idle_add(self.on_fetch_done, data)
         except Exception as e:
             Log.err(f"fetch failed: {e}")
@@ -685,12 +692,6 @@ class AnalyzerResultsPage(Adw.NavigationPage):
         self.progress_bar.set_visible(False)
         header.pack_end(self.progress_bar)
 
-        self.copy_btn = Gtk.Button(icon_name="edit-copy-symbolic")
-        self.copy_btn.set_valign(Gtk.Align.CENTER)
-        self.copy_btn.set_tooltip_text("Copy Video ID")
-        self.copy_btn.connect("clicked", self.on_copy_id)
-        header.pack_end(self.copy_btn)
-
         toolbar_view.add_top_bar(header)
 
         self.results_scrolled = Gtk.ScrolledWindow()
@@ -715,56 +716,135 @@ class AnalyzerResultsPage(Adw.NavigationPage):
             Log.dbg(f"copied id {vid_id} to clipboard")
             self.window.show_toast(f"Copied ID: {vid_id}")
 
+    @staticmethod
+    def _add_row_icon(row, icon_name):
+        icon = Gtk.Image.new_from_icon_name(icon_name)
+        icon.set_pixel_size(16)
+        icon.add_css_class("dim-label")
+        row.add_prefix(icon)
+
+    @staticmethod
+    def _section(title, icon_name):
+        section = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        heading = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        heading.set_margin_start(6)
+
+        icon = Gtk.Image.new_from_icon_name(icon_name)
+        icon.set_pixel_size(18)
+        icon.add_css_class("heading")
+        heading.append(icon)
+
+        label = Gtk.Label(label=title, xalign=0)
+        label.add_css_class("heading")
+        heading.append(label)
+        section.append(heading)
+
+        group = Adw.PreferencesGroup()
+        section.append(group)
+        return section, group
+
     def populate(self, info):
         self.current_info = info
 
         while child := self.results_box.get_first_child():
             self.results_box.remove(child)
 
-        details = Adw.PreferencesGroup(title="Details")
-        cap_row = Adw.ActionRow(title="Caption")
-        cap_row.set_subtitle(info.get('description', 'No caption'))
-        details.add(cap_row)
-
-        aud_row = Adw.ActionRow(title="Audio")
-        aud_row.set_subtitle(f"{info.get('track', 'original sound')} - {info.get('artist', '')}")
-        details.add(aud_row)
-        self.results_box.append(details)
-
-        stats = Adw.PreferencesGroup(title="Statistics")
+        metadata = info.get('_tikutils') or analyzer.normalize_metadata(info)
+        stats_section, stats = self._section("Statistics", "view-list-symbolic")
         stat_map = [
-            ("Views", "view_count"),
-            ("Likes", "like_count"),
-            ("Comments", "comment_count"),
-            ("Favorites", "bookmark_count"),
-            ("Shares", "repost_count"),
+            ("Views", "views", "view-reveal-symbolic"),
+            ("Likes", "likes", "star-new-symbolic"),
+            ("Comments", "comments", "chat-message-new-symbolic"),
+            ("Favorites", "favorites", "starred-symbolic"),
+            ("Shares", "shares", "network-transmit-symbolic"),
         ]
-        for name, key in stat_map:
-            val = info.get(key, 0) or info.get(key.replace('_count', '') + '_count', 0) or 0
+        for name, key, icon_name in stat_map:
+            val = metadata.get(key)
             row = Adw.ActionRow(title=name)
-            lbl = Gtk.Label(label=f"{val:,}")
+            self._add_row_icon(row, icon_name)
+            lbl = Gtk.Label(label=f"{val:,}" if isinstance(val, (int, float)) else (str(val) if val else "Unavailable"))
             lbl.add_css_class("numeric")
             lbl.add_css_class("dim-label")
             row.add_suffix(lbl)
             stats.add(row)
-        self.results_box.append(stats)
+        self.results_box.append(stats_section)
 
-        streams = Adw.PreferencesGroup(title="Video streams")
+        details_section, details = self._section("Information", "dialog-information-symbolic")
+        info_rows = [
+            ("Video ID", metadata.get('video_id'), "video-x-generic-symbolic"),
+            ("Upload source", metadata.get('upload_source'), "preferences-system-devices-symbolic"),
+            ("VQScore", metadata.get('vq_score'), "document-properties-symbolic"),
+            ("Creator region", metadata.get('region'), "mark-location-symbolic"),
+            ("Shadowban", metadata.get('shadowban'), "security-high-symbolic"),
+        ]
+        for title, value, icon_name in info_rows:
+            row = Adw.ActionRow(title=title)
+            if title == "Upload source" and value:
+                icon_name = ("phone-apple-iphone-symbolic" if str(value).startswith("Phone")
+                             else "computer-symbolic" if str(value).startswith("Desktop")
+                             else icon_name)
+            self._add_row_icon(row, icon_name)
+            if value is not None:
+                subtitle = str(value)
+            elif title == "Upload source":
+                subtitle = "Could not inspect a TikTok MP4 stream"
+            elif title == "VQScore":
+                subtitle = "Undetermined"
+            else:
+                subtitle = "Unavailable from public video metadata"
+            row.set_subtitle(subtitle)
+            if title == "Video ID":
+                copy_btn = Gtk.Button(icon_name="edit-copy-symbolic")
+                copy_btn.add_css_class("flat")
+                copy_btn.set_valign(Gtk.Align.CENTER)
+                copy_btn.set_tooltip_text("Copy Video ID")
+                copy_btn.connect("clicked", self.on_copy_id)
+                row.add_suffix(copy_btn)
+            details.add(row)
+        caption = Adw.ActionRow(title="Caption")
+        self._add_row_icon(caption, "text-x-generic-symbolic")
+        caption_text = (info.get('description') or "No caption")
+        caption_text = caption_text.replace("\r\n", "\n").replace("\r", "\n")
+        caption.set_subtitle(caption_text)
+        caption.set_subtitle_selectable(True)
+        caption.set_subtitle_lines(max(2, caption_text.count("\n") + 1))
+        details.add(caption)
+        audio = Adw.ActionRow(title="Audio")
+        self._add_row_icon(audio, "audio-x-generic-symbolic")
+        audio.set_subtitle(f"{info.get('track') or 'original sound'} - {info.get('artist') or ''}")
+        details.add(audio)
+        self.results_box.append(details_section)
 
-        origin = info.get('_origin', {'type': None, 'value': None})
-        if origin.get('type'):
-            orig_row = Adw.ActionRow(title="Origin", subtitle="Source video")
-            orig_btn = Gtk.Button(icon_name="folder-download-symbolic")
-            orig_btn.add_css_class("flat")
-            orig_btn.connect("clicked", self.on_download_origin)
-            orig_row.add_suffix(orig_btn)
-            orig_row.set_activatable_widget(orig_btn)
-            streams.add(orig_row)
+        quality_section, quality = self._section("Quality", "preferences-system-devices-symbolic")
+        best = max((f for f in info.get('formats', []) if f.get('width') and f.get('height')),
+                   key=analyzer.stream_rank, default=None)
+        served = resolution_string(best.get('width'), best.get('height'), best.get('fps')) if best else "Unavailable"
+        for title, value, icon_name in [
+            ("Browser", metadata.get('browser_quality') or (f"Up to {served} (available browser stream; client not identified)" if best else served), "web-browser-symbolic"),
+            ("Mobile", metadata.get('mobile_quality') or metadata.get('browser_quality') or served, "phone-apple-iphone-symbolic"),
+            ("Original resolution", f"{metadata['original_width']}x{metadata['original_height']}" if metadata.get('original_width') and metadata.get('original_height') else "Unavailable", "video-display-symbolic"),
+        ]:
+            row = Adw.ActionRow(title=title)
+            self._add_row_icon(row, icon_name)
+            row.set_subtitle(value)
+            quality.add(row)
+        self.results_box.append(quality_section)
+
+        categories_section, categories = self._section("Categories", "applications-games-symbolic")
+        category_row = Adw.ActionRow(title="TikTok detected categories")
+        self._add_row_icon(category_row, "view-list-symbolic")
+        category_row.set_subtitle(", ".join(metadata.get('categories') or []) or "Unavailable from public metadata")
+        categories.add(category_row)
+        self.results_box.append(categories_section)
+
+        streams_section, streams = self._section("Streams and downloads", "folder-download-symbolic")
 
         formats = info.get('formats', [])
         video_formats = [f for f in formats if f.get('width', 0) > 0 and f.get('height', 0) > 0]
 
-        for f in get_unique_streams(video_formats):
+        unique_streams = get_unique_streams(video_formats)
+        best_stream = unique_streams[0] if unique_streams else None
+        for f in unique_streams:
             width = f.get('width', 0)
             height = f.get('height', 0)
             fps = f.get('fps', 0)
@@ -772,7 +852,15 @@ class AnalyzerResultsPage(Adw.NavigationPage):
             tbr = f.get('tbr') or 0
 
             row = Adw.ActionRow(title=f"{resolution_string(width, height, fps)} • {vcodec.upper()}")
-            row.set_subtitle(f"{format_bytes(f.get('filesize', 0))} • {format_bitrate(tbr * 1024)}")
+            self._add_row_icon(row, "camera-video-symbolic")
+            row.set_subtitle(f"{format_bytes(f.get('filesize', 0))} • {format_bitrate(tbr * 1000)}")
+
+            if f is best_stream:
+                best_pill = Gtk.Label(label="BEST")
+                best_pill.add_css_class("caption")
+                best_pill.add_css_class("best-stream-pill")
+                best_pill.set_valign(Gtk.Align.CENTER)
+                row.add_suffix(best_pill)
 
             dl_btn = Gtk.Button(icon_name="folder-download-symbolic")
             dl_btn.add_css_class("flat")
@@ -782,43 +870,29 @@ class AnalyzerResultsPage(Adw.NavigationPage):
             row.set_activatable_widget(dl_btn)
             streams.add(row)
 
-        self.results_box.append(streams)
-
-    def on_download_origin(self, btn):
-        origin = (self.current_info or {}).get('_origin', {'type': None, 'value': None})
-        if not origin.get('type'):
-            Log.wrn("origin download not available for this video")
-            self.window.show_toast("Origin not available for this video")
-            return
-
-        username = (self.current_info or {}).get('uploader', 'user')
-        suggested = make_save_name(username, 'origin')
-
-        if origin['type'] == 'direct':
-            self.start_download(origin['value'], None, suggested, "Origin", direct=True)
-        else:
-            self.start_download((self.current_info or {}).get('webpage_url', ''),
-                                origin['value'], suggested, "Origin")
+        self.results_box.append(streams_section)
 
     def on_download_stream(self, btn, format_id, suffix):
         if not self.current_info or not format_id:
             return
         suggested = make_save_name(self.current_info.get('uploader', 'user'), suffix)
-        self.start_download(self.current_info.get('webpage_url', ''), format_id,
-                            suggested, format_id)
+        stream = next((f for f in self.current_info.get('formats', [])
+                       if f.get('format_id') == format_id), None)
+        if stream and stream.get('url'):
+            self.start_download(stream['url'], suggested, format_id)
 
-    def start_download(self, url, format_selector, suggested_name, label, direct=False):
+    def start_download(self, url, suggested_name, label):
         self.progress_bar.set_visible(True)
         self.progress_bar.set_fraction(0.0)
         Log.inf(f"starting download: {label}")
         self.window.show_toast(f"Downloading {label}...")
 
         thread = threading.Thread(target=self.download_to_cache,
-                                  args=(url, format_selector, suggested_name, label, direct),
+                                  args=(url, suggested_name, label),
                                   daemon=True)
         thread.start()
 
-    def download_to_cache(self, url, format_selector, suggested_name, label, direct):
+    def download_to_cache(self, url, suggested_name, label):
         temp_dir = tempfile.mkdtemp(prefix="tikutils_")
         temp_path = os.path.join(temp_dir, suggested_name)
 
@@ -826,10 +900,7 @@ class AnalyzerResultsPage(Adw.NavigationPage):
             GLib.idle_add(self.progress_bar.set_fraction, frac)
 
         try:
-            if direct:
-                analyzer.download_direct(url, temp_path, update_progress)
-            else:
-                analyzer.download_ytdlp(url, format_selector, temp_path, update_progress)
+            analyzer.download_stream(url, temp_path, update_progress)
 
             if os.path.exists(temp_path) and os.path.getsize(temp_path) > 0:
                 Log.inf(f"download complete: {label}")
