@@ -12,6 +12,17 @@ from pathlib import Path
 
 log = logging.getLogger("TikUtils.patcher")
 
+# codec-aware dummy sample sizes from NoBlur
+CODEC_DUMMY_SIZES = {
+    b'avc1': 8,
+    b'avc3': 8,
+    b'hvc1': 16,
+    b'hev1': 16,
+    b'vp09': 4,
+    b'av01': 4,
+    b'mp4v': 8,
+}
+
 DEFAULTS = {
     "encoder": "Lavf59.27.100",
     "comment": "Patched by Buwryme",
@@ -188,6 +199,53 @@ def build_trailing_garbage(size: int) -> bytes:
     return void_box + (pattern * repeats)
 
 
+def detect_video_codec(data: bytearray) -> bytes:
+    """detect video codec fourcc from first video sample entry in stsd"""
+    moov = find_box(data, b'moov')
+    if not moov:
+        return b'avc1'
+    # walk moov -> trak -> mdia -> minf -> stbl -> stsd
+    for trak in parse_boxes(data, moov["offset"] + 8, moov["end"]):
+        if trak["type"] != b'trak':
+            continue
+        for mdia in parse_boxes(data, trak["offset"] + 8, trak["end"]):
+            if mdia["type"] != b'mdia':
+                continue
+            # check hdlr to confirm this is a video track
+            is_video = False
+            for child in parse_boxes(data, mdia["offset"] + 8, mdia["end"]):
+                if child["type"] == b'hdlr':
+                    ht = data[child["offset"]+16:child["offset"]+20]
+                    if ht == b'vide':
+                        is_video = True
+                    break
+            if not is_video:
+                continue
+            for minf in parse_boxes(data, mdia["offset"] + 8, mdia["end"]):
+                if minf["type"] != b'minf':
+                    continue
+                for stbl in parse_boxes(data, minf["offset"] + 8, minf["end"]):
+                    if stbl["type"] != b'stbl':
+                        continue
+                    for stsd in parse_boxes(data, stbl["offset"] + 8, stbl["end"]):
+                        if stsd["type"] != b'stsd':
+                            continue
+                        # first child of stsd is the sample entry
+                        entries = parse_boxes(data, stsd["offset"] + 8, stsd["end"])
+                        if entries:
+                            codec = entries[0]["type"]
+                            log.info(f"detected video codec: {codec.decode('ascii', errors='replace')}")
+                            return codec
+    return b'avc1'
+
+
+def get_dummy_size_for_codec(codec_fourcc: bytes) -> int:
+    """return codec-appropriate dummy sample size"""
+    size = CODEC_DUMMY_SIZES.get(codec_fourcc, 8)
+    log.debug(f"dummy sample size for {codec_fourcc}: {size}")
+    return size
+
+
 def zero_mp4a_samplerate(data: bytearray):
     """zero out SampleRate in all mp4a sample entries"""
     top_boxes = parse_boxes(data, 0, len(data))
@@ -295,12 +353,12 @@ def _apply_mp4a_bitrates(data: bytearray, start: int, end: int, avg: int, mx: in
 
 
 def copy_avcc_from_source(source_path: str, target_data: bytearray) -> bytearray:
-    """copy raw avcC box from source to target moov/stsd/avc1"""
+    """copy raw avcC/hvcC box from source to target moov/stsd"""
     try:
         with open(source_path, 'rb') as f:
             src = bytearray(f.read())
     except IOError as e:
-        log.warning(f"could not read source for avcC copy: {e}")
+        log.warning(f"could not read source for codec config copy: {e}")
         return target_data
 
     src_moov = find_box(src, b'moov')
@@ -308,16 +366,15 @@ def copy_avcc_from_source(source_path: str, target_data: bytearray) -> bytearray
     if not src_moov or not tgt_moov:
         return target_data
 
-    src_avcc = find_box(src, b'avcC', src_moov["offset"], src_moov["end"])
-    tgt_avcc = find_box(target_data, b'avcC', tgt_moov["offset"], tgt_moov["end"])
-    if not src_avcc or not tgt_avcc:
-        return target_data
-
-    if src_avcc["size"] == tgt_avcc["size"]:
-        target_data[tgt_avcc["offset"]:tgt_avcc["end"]] = src[src_avcc["offset"]:src_avcc["end"]]
-        log.debug("copied avcC box from source (same size)")
-    else:
-        log.warning(f"avcC size mismatch: src={src_avcc['size']} tgt={tgt_avcc['size']}, skipping binary copy")
+    # try avcC first, then hvcC
+    for cfg_box in (b'avcC', b'hvcC'):
+        src_cfg = find_box(src, cfg_box, src_moov["offset"], src_moov["end"])
+        tgt_cfg = find_box(target_data, cfg_box, tgt_moov["offset"], tgt_moov["end"])
+        if src_cfg and tgt_cfg and src_cfg["size"] == tgt_cfg["size"]:
+            target_data[tgt_cfg["offset"]:tgt_cfg["end"]] = src[src_cfg["offset"]:src_cfg["end"]]
+            log.debug(f"copied {cfg_box.decode()} box from source (same size)")
+        elif src_cfg and tgt_cfg:
+            log.warning(f"{cfg_box.decode()} size mismatch: src={src_cfg['size']} tgt={tgt_cfg['size']}, skipping")
 
     return target_data
 
@@ -367,11 +424,8 @@ def upgrade_mvhd_to_v1(mvhd: bytearray) -> bytearray:
     ntid_off = 96 if ver == 0 else 108
     ntid = read_u32be(mvhd, ntid_off)
 
-    # v1 mvhd body is 112 bytes INCLUDING the 4-byte version/flags prefix
     body = bytearray(112)
     body[0] = 1  # version=1, flags=0x000000
-    # creation_time @ 4 = 0 (already zero)
-    # modification_time @ 12 = 0
     struct.pack_into('>I', body, 20, timescale)
     struct.pack_into('>Q', body, 24, 0xFFFFFFFFFFFFFFFF)
     struct.pack_into('>I', body, 32, 0x00010000)
@@ -381,7 +435,6 @@ def upgrade_mvhd_to_v1(mvhd: bytearray) -> bytearray:
     struct.pack_into('>I', body, 76, 0x40000000)
     struct.pack_into('>I', body, 108, 5)
 
-    # use build_box, NOT build_fullbox — version byte is already in body
     return bytearray(build_box(b'mvhd', bytes(body)))
 
 
@@ -448,6 +501,13 @@ def patch_mp4(input_path: str, cfg: dict, source_path: str = None) -> bool:
 
     if source_path and not cfg.get("re_encode", True):
         data = copy_avcc_from_source(source_path, data)
+
+    # detect video codec and set appropriate dummy size
+    video_codec = detect_video_codec(data)
+    auto_dummy = get_dummy_size_for_codec(video_codec)
+    global _inflate_factor, _dummy_size
+    _inflate_factor = cfg.get("inflation_rate", DEFAULTS["inflation_rate"])
+    _dummy_size = auto_dummy
 
     log.info("[1/7] parsing box structure...")
     top_boxes = parse_boxes(data, 0, len(data))
@@ -693,7 +753,7 @@ def patch_stbl(stbl_data: bytearray) -> bytearray:
     if not all([stsz_box, stts_box, stsc_box, stco_box]):
         return stbl_data
 
-    inflate_factor = getattr(sys.modules[__name__], '_inflate_factor', 9)
+    inflate_factor = getattr(sys.modules[__name__], '_inflate_factor', 10)
     dummy_size = getattr(sys.modules[__name__], '_dummy_size', 8)
 
     stsz_payload = stbl_data[stsz_box["offset"] + 12:stsz_box["end"]]
@@ -775,7 +835,7 @@ def patch_stbl(stbl_data: bytearray) -> bytearray:
     for sz in new_sizes:
         new_stsz_payload += struct.pack('>I', sz)
     new_stsz = build_fullbox(b'stsz', 0, 0, new_stsz_payload)
-    log.info(f"INFLATE: factor={inflate_factor}, real_count={real_count}, extra={extra_count}, new_count={new_count}")
+    log.info(f"INFLATE: factor={inflate_factor}, dummy_size={dummy_size}, real_count={real_count}, extra={extra_count}, new_count={new_count}")
     log.debug(f"inflated stsz: {real_count} → {new_count}")
 
     orig_stts_pay = stbl_data[stts_box["offset"] + 12:stts_box["end"]]
