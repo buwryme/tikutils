@@ -7,7 +7,7 @@
 gtk4/libadwaita tiktok analytics & lossless stream patcher for linux
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
-[![Version](https://img.shields.io/badge/Version-v1.1.3-purple?style=flat-square)](VERSION)
+[![Version](https://img.shields.io/badge/Version-v1.2.0-purple?style=flat-square)](VERSION)
 [![Platform](https://img.shields.io/badge/Platform-Linux-linux?style=flat-square&logo=linux&logoColor=white)](#installation)
 [![GTK](https://img.shields.io/badge/GTK-4.0%20%7C%20Libadwaita-orange?style=flat-square&logo=gnome&logoColor=white)](#features)
 
