@@ -773,7 +773,7 @@ class AnalyzerResultsPage(Adw.NavigationPage):
         info_rows = [
             ("Video ID", metadata.get('video_id'), "video-x-generic-symbolic"),
             ("Upload source", metadata.get('upload_source'), "preferences-system-devices-symbolic"),
-            ("VQScore", metadata.get('vq_score'), "document-properties-symbolic"),
+            ("Video Quality Score", metadata.get('vq_score'), "document-properties-symbolic"),
             ("Creator region", metadata.get('region'), "mark-location-symbolic"),
             ("Shadowban", metadata.get('shadowban'), "security-high-symbolic"),
         ]
@@ -788,7 +788,7 @@ class AnalyzerResultsPage(Adw.NavigationPage):
                 subtitle = str(value)
             elif title == "Upload source":
                 subtitle = "Could not inspect a TikTok MP4 stream"
-            elif title == "VQScore":
+            elif title == "Video Quality Score":
                 subtitle = "Undetermined"
             else:
                 subtitle = "Unavailable from public video metadata"
