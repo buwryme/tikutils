@@ -774,7 +774,7 @@ class AnalyzerResultsPage(Adw.NavigationPage):
             ("Video ID", metadata.get('video_id'), "video-x-generic-symbolic"),
             ("Upload source", metadata.get('upload_source'), "preferences-system-devices-symbolic"),
             ("Video Quality Score", metadata.get('vq_score'), "document-properties-symbolic"),
-            ("Creator region", metadata.get('region'), "mark-location-symbolic"),
+            ("Region", metadata.get('region'), "mark-location-symbolic"),
             ("Shadowban", metadata.get('shadowban'), "security-high-symbolic"),
         ]
         for title, value, icon_name in info_rows:
