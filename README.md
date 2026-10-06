@@ -10,7 +10,7 @@ gtk4/libadwaita tiktok analytics & lossless stream patcher for linux
 [![Version](https://img.shields.io/badge/Version-v1.2.0-purple?style=flat-square)](VERSION)
 [![Platform](https://img.shields.io/badge/Platform-Linux-linux?style=flat-square&logo=linux&logoColor=white)](#installation)
 [![GTK](https://img.shields.io/badge/GTK-4.0%20%7C%20Libadwaita-orange?style=flat-square&logo=gnome&logoColor=white)](#features)
-![Patcher Status](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fbuwryme%2Fbuwryy.net%2Fmain%2F.github%2Fpatcher-status.json&style=flat-square)
+![Patcher Status](https://img.shields.io/endpoint?url=https%3A%2F%2Fbuwryy.net%2Fapi%2Fpatcher-status&style=flat-square)
 
 </div>
 
