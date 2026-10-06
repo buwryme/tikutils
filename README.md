@@ -10,6 +10,7 @@ gtk4/libadwaita tiktok analytics & lossless stream patcher for linux
 [![Version](https://img.shields.io/badge/Version-v1.2.0-purple?style=flat-square)](VERSION)
 [![Platform](https://img.shields.io/badge/Platform-Linux-linux?style=flat-square&logo=linux&logoColor=white)](#installation)
 [![GTK](https://img.shields.io/badge/GTK-4.0%20%7C%20Libadwaita-orange?style=flat-square&logo=gnome&logoColor=white)](#features)
+[![Patcher Status](https://img.shields.io/badge/patcher-active-green?style=flat-square)](#features)
 
 </div>
 
@@ -51,8 +52,6 @@ run `tikutils` from your terminal or app grid.
 tiktok's transcoders choke on the mismatch and skip re-encoding. mobile decoders ignore the dummy track and play normally.
 
 ---
-
-> works as of sep 2026. use responsibly.
 
 for inquiries contact **@buwryy** on discord
 
