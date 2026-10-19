@@ -16,6 +16,8 @@ gtk4/libadwaita tiktok analytics & lossless stream patcher for linux
 
 ---
 
+Reverse engineered from Editing News' patcher and made open source.
+
 ## requirements
 - python 3.10+
 - ffmpeg (in `$PATH`)
@@ -43,13 +45,17 @@ run `tikutils` from your terminal or app grid.
 
 ## how it works
 
-1.  encodes video using constant rate factor (crf) for consistent quality.
-2.  duplicates the audio track and inflates its `stsz` table with dummy samples to create a structural mismatch.
-3.  strips `tmcd`/`tref` tracks and normalizes handler names.
-4.  injects dual `meta` boxes with custom metadata and an unknown `name` box.
-5.  appends a `VOID` box and repeating trailing pattern bytes.
+1.  encodes or remuxes video using constant rate factor (crf) for consistent quality.
+2.  removes all `udta` metadata and writes one `©too` watermark.
+3.  rebuilds the video sample table with codec-sized dummy samples and updates `stts`, `stsc`, `stsz`, and `stco`.
+4.  rewrites the `btrt` bitrate fields from the real sample sizes.
+5.  moves `moov` before `mdat` (faststart) and appends the dummy sample payload.
 
-tiktok's transcoders choke on the mismatch and skip re-encoding. mobile decoders ignore the dummy track and play normally.
+tiktok's transcoders choke on the mismatch and skip re-encoding. mobile decoders ignore the dummy samples and play normally.
+
+## configuration
+
+patcher tuning (sample multiplier, dummy sample sizes and payloads for every codec, watermark, and layout flags) is fetched from a public `.toml` gist. if the fetch fails, the built-in copy is used. encode settings remain available in the app.
 
 ---
 

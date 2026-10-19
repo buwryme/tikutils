@@ -367,31 +367,6 @@ class PatcherSettingsPage(Adw.NavigationPage):
         session_group.add(self.file_row)
         prefs_page.add(session_group)
 
-        # metadata group — using EntryRow per HIG boxed list guidelines
-        meta_group = Adw.PreferencesGroup(title="Metadata")
-
-        self.encoder_row = Adw.EntryRow(title="Encoder")
-        self.encoder_row.set_text(str(self.config_manager.config.get("encoder", "")))
-        self.encoder_row.connect("changed", self.on_setting_changed)
-        meta_group.add(self.encoder_row)
-
-        self.comment_row = Adw.EntryRow(title="Comment (primary)")
-        self.comment_row.set_text(str(self.config_manager.config.get("comment", "")))
-        self.comment_row.connect("changed", self.on_setting_changed)
-        meta_group.add(self.comment_row)
-
-        self.comment_short_row = Adw.EntryRow(title="Comment (secondary)")
-        self.comment_short_row.set_text(str(self.config_manager.config.get("comment_short", "")))
-        self.comment_short_row.connect("changed", self.on_setting_changed)
-        meta_group.add(self.comment_short_row)
-
-        self.name_row = Adw.EntryRow(title="Name Box Payload")
-        self.name_row.set_text(str(self.config_manager.config.get("name_box_payload", "")))
-        self.name_row.connect("changed", self.on_setting_changed)
-        meta_group.add(self.name_row)
-
-        prefs_page.add(meta_group)
-
         # patcher options group
         patch_group = Adw.PreferencesGroup(title="Patcher Options")
 
@@ -416,20 +391,6 @@ class PatcherSettingsPage(Adw.NavigationPage):
         self.crf_row.set_subtitle("Lower is better quality/larger file")
         self.crf_row.connect("notify::value", self.on_setting_changed)
         patch_group.add(self.crf_row)
-
-        self.infl_row = Adw.SpinRow(title="Inflation Factor", adjustment=Gtk.Adjustment(
-            value=self.config_manager.config.get("inflation_rate", 10),
-            lower=1, upper=100, step_increment=1))
-        self.infl_row.set_subtitle("Multiplier for audio sample table padding")
-        self.infl_row.connect("notify::value", self.on_setting_changed)
-        patch_group.add(self.infl_row)
-
-        self.trail_row = Adw.SpinRow(title="Trailing Dummy Bytes", adjustment=Gtk.Adjustment(
-            value=self.config_manager.config.get("trailing_bytes", 33836),
-            lower=0, upper=1000000, step_increment=100))
-        self.trail_row.set_subtitle("Junk data appended to confuse validators")
-        self.trail_row.connect("notify::value", self.on_setting_changed)
-        patch_group.add(self.trail_row)
 
         prefs_page.add(patch_group)
         toolbar_view.set_content(prefs_page)
@@ -468,28 +429,16 @@ class PatcherSettingsPage(Adw.NavigationPage):
         self.file_row.set_subtitle(Path(path).name)
 
     def get_current_config(self):
-        cfg = self.config_manager.config.copy()
-        cfg["encoder"] = self.encoder_row.get_text()
-        cfg["comment"] = self.comment_row.get_text()
-        cfg["comment_short"] = self.comment_short_row.get_text()
-        cfg["name_box_payload"] = self.name_row.get_text()
-        cfg["re_encode"] = self.reenc_row.get_active()
-        cfg["codec"] = "h265" if self.codec_row.get_selected() == 1 else "h264"
-        cfg["crf"] = int(self.crf_row.get_value())
-        cfg["inflation_rate"] = int(self.infl_row.get_value())
-        cfg["trailing_bytes"] = int(self.trail_row.get_value())
-        return cfg
+        return {
+            "re_encode": self.reenc_row.get_active(),
+            "codec": "h265" if self.codec_row.get_selected() == 1 else "h264",
+            "crf": int(self.crf_row.get_value()),
+        }
 
     def apply_config_to_widgets(self, cfg):
-        self.encoder_row.set_text(str(cfg.get("encoder", "")))
-        self.comment_row.set_text(str(cfg.get("comment", "")))
-        self.comment_short_row.set_text(str(cfg.get("comment_short", "")))
-        self.name_row.set_text(str(cfg.get("name_box_payload", "")))
         self.reenc_row.set_active(cfg.get("re_encode", True))
         self.codec_row.set_selected(1 if cfg.get("codec", "h264") == "h265" else 0)
         self.crf_row.set_value(cfg.get("crf", 18))
-        self.infl_row.set_value(cfg.get("inflation_rate", 10))
-        self.trail_row.set_value(cfg.get("trailing_bytes", 33836))
         self.update_encoding_visibility()
 
     def on_reenc_toggled(self, row, param):
@@ -560,11 +509,6 @@ class PatcherSettingsPage(Adw.NavigationPage):
             shutil.copy2(target, copy_path)
             Log.inf(f"patching temp copy: {copy_path}")
 
-            from backend.patcher import set_runtime_params
-            set_runtime_params(
-                config.get("inflation_rate", 10),
-                config.get("dummy_sample_size", 8),
-            )
             patch_video(copy_path, config)
 
             result_path = os.path.join(temp_dir, "source_tiktok.mp4")
