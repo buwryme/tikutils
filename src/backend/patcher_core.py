@@ -1,0 +1,1 @@
+vendor/tiktok-lossless-upload/tiktok_lossless_patch.py

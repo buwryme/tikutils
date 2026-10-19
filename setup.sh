@@ -134,8 +134,18 @@ detect_deps
 section "directory structure"
 run_progress "creating dirs" mkdir -p "$bin_dir" "$install_dir" "$HOME/.local/share/applications" "$HOME/.local/share/icons/hicolor/scalable/apps" "$HOME/.local/share/$APP_ID/logs"
 
+section "patcher core"
+if [[ -f "$SCRIPT_DIR/.gitmodules" ]]; then
+    need_cmd git
+    run_progress "fetching patcher core" git -C "$SCRIPT_DIR" submodule update --init --depth 1
+    run_progress "limiting patcher core checkout" bash -c "git -C '$SCRIPT_DIR/src/backend/vendor/tiktok-lossless-upload' sparse-checkout init --no-cone && git -C '$SCRIPT_DIR/src/backend/vendor/tiktok-lossless-upload' sparse-checkout set /tiktok_lossless_patch.py"
+else
+    warn "submodule metadata missing; patcher core may be unavailable"
+fi
+
 section "installing files"
 run_progress "copying src" cp -r "$SCRIPT_DIR/src" "$install_dir/"
+find "$install_dir/src/backend/vendor" -name .git -type f -delete 2>/dev/null || true
 
 if [[ -f "$SCRIPT_DIR/VERSION" ]]; then
     cp "$SCRIPT_DIR/VERSION" "$install_dir/src/VERSION"
