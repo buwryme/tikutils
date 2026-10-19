@@ -57,7 +57,7 @@ tiktok's transcoders choke on the mismatch and skip re-encoding. mobile decoders
 
 patcher tuning (sample multiplier, dummy sample sizes and payloads for every codec, watermark, and layout flags) is fetched from a public `.toml` gist. if the fetch fails, the built-in copy is used. encode settings remain available in the app.
 
-the patcher core is a git submodule of [tiktok-lossless-upload](https://github.com/buwryme/tiktok-lossless-upload). `setup.sh` sparse-checks out only `tiktok_lossless_patch.py` and exposes it as `src/backend/patcher_core.py`.
+the patcher core is a git submodule of [tiktok-lossless-upload](https://github.com/buwryme/tiktok-lossless-upload). it tracks the latest `main` commit; `setup.sh` runs `git submodule update --remote`, sparse-checks out only `tiktok_lossless_patch.py`, and exposes it as `src/backend/patcher_core.py`.
 
 ---
 

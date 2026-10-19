@@ -137,7 +137,7 @@ run_progress "creating dirs" mkdir -p "$bin_dir" "$install_dir" "$HOME/.local/sh
 section "patcher core"
 if [[ -f "$SCRIPT_DIR/.gitmodules" ]]; then
     need_cmd git
-    run_progress "fetching patcher core" git -C "$SCRIPT_DIR" submodule update --init --depth 1
+    run_progress "fetching latest patcher core" git -C "$SCRIPT_DIR" submodule update --init --remote --depth 1
     run_progress "limiting patcher core checkout" bash -c "git -C '$SCRIPT_DIR/src/backend/vendor/tiktok-lossless-upload' sparse-checkout init --no-cone && git -C '$SCRIPT_DIR/src/backend/vendor/tiktok-lossless-upload' sparse-checkout set /tiktok_lossless_patch.py"
 else
     warn "submodule metadata missing; patcher core may be unavailable"

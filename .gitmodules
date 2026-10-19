@@ -2,3 +2,4 @@
 	path = src/backend/vendor/tiktok-lossless-upload
 	url = https://github.com/buwryme/tiktok-lossless-upload.git
 	shallow = true
+	branch = main
