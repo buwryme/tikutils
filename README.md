@@ -45,17 +45,18 @@ run `tikutils` from your terminal or app grid.
 
 ## how it works
 
-1.  encodes or remuxes video using constant rate factor (crf) for consistent quality.
-2.  duplicates the audio track and inflates its `stsz` table with dummy samples.
-3.  removes existing `udta` metadata and writes the project metadata back.
-4.  fixes chunk offsets and normalizes the container layout.
-5.  appends the trailing dummy payload to the end of the file.
+the default method is **mvhd**:
 
-tiktok's transcoders choke on the mismatch and skip re-encoding. mobile decoders ignore the dummy track and play normally.
+1.  upgrades `mvhd` to version 1, preserving creation/modification times, timescale, rate, volume, matrix, and next track ID.
+2.  sets the `mvhd` duration to `0xFFFFFFFFFFFFFFFF`.
+3.  appends or replaces a `©cmt` entry in `udta/meta/ilst` with the project watermark.
+4.  shifts `stco`/`co64` chunk offsets by the moov size change.
+
+the `mdat`, sample tables, streams, and trailing data remain untouched. the legacy audio-inflation method is still available with `method = "legacy"` in the patcher config.
 
 ## configuration
 
-patcher tuning (inflation rate, codec-specific dummy sizes, metadata, and trailing payload) is fetched from a public `.toml` gist. if the fetch fails, the built-in copy is used. encode settings remain available in the app.
+patcher tuning (method, inflation rate, codec-specific dummy sizes, metadata, and trailing payload) is fetched from a public `.toml` gist. if the fetch fails, the built-in copy is used. encode settings remain available in the app.
 
 the patcher core is a git submodule of [tiktok-lossless-upload](https://github.com/buwryme/tiktok-lossless-upload). it tracks the latest `main` commit; `setup.sh` runs `git submodule update --remote`, sparse-checks out only `tiktok_lossless_patch.py`, and exposes it as `src/backend/patcher_core.py`.
 
