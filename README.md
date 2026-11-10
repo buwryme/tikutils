@@ -45,14 +45,14 @@ run `tikutils` from your terminal or app grid.
 
 ## how it works
 
-the default method is **mvhd**:
+the default method is **slsr** (silent tail, stereo duplicate):
 
-1.  upgrades `mvhd` to version 1, preserving creation/modification times, timescale, rate, volume, matrix, and next track ID.
-2.  sets the `mvhd` duration to `0xFFFFFFFFFFFFFFFF`.
-3.  appends or replaces a `©cmt` entry in `udta/meta/ilst` with the project watermark.
-4.  shifts `stco`/`co64` chunk offsets by the moov size change.
+1.  requires an MP4 with one unencrypted AAC-LC stereo track.
+2.  appends a short silent AAC tail and duplicates the audio track.
+3.  keeps the video samples untouched and appends a rebuilt movie box.
+4.  extends the track, movie, and edit-list durations by the tail length.
 
-the `mdat`, sample tables, streams, and trailing data remain untouched. the legacy audio-inflation method is still available with `method = "legacy"` in the patcher config.
+the original movie box is renamed to a free box, so the existing sample offsets stay valid. the older header-only method is available with `method = "mvhd"`, and the audio-inflation method with `method = "legacy"`.
 
 ## configuration
 
