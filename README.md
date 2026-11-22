@@ -45,14 +45,16 @@ run `tikutils` from your terminal or app grid.
 
 ## how it works
 
-the default method is **slsr** (silent tail, stereo duplicate):
+the default method is **obx**:
 
-1.  requires an MP4 with one unencrypted AAC-LC stereo track.
-2.  appends a short silent AAC tail and duplicates the audio track.
-3.  keeps the video samples untouched and appends a rebuilt movie box.
-4.  extends the track, movie, and edit-list durations by the tail length.
+1.  requires a non-fragmented MP4 with a video track and at least one AAC audio track.
+2.  rewrites or appends the four-sample audio tail and updates the audio tables.
+3.  renames the original movie box to a free box and appends a rebuilt movie box.
+4.  adds a `©cmt` comment with the project watermark.
 
-the original movie box is renamed to a free box, so the existing sample offsets stay valid. the older header-only method is available with `method = "mvhd"`, and the audio-inflation method with `method = "legacy"`.
+the video samples are copied without re-encoding. the original media stays in place, so existing chunk offsets still resolve.
+
+the older silent-tail method is available with `method = "slsr"`, the header-only method with `method = "mvhd"`, and the audio-inflation method with `method = "legacy"`.
 
 ## configuration
 
