@@ -185,7 +185,7 @@ class TikUtilsWindow(Adw.ApplicationWindow):
             about.set_developers(["buwryme"])
             about.set_license_type(Gtk.License.MIT_X11)
             about.set_comments("TikTok utilities app made with GTK4/Libadwaita")
-            about.set_website("https://github.com/buwryme")
+            about.set_website("https://git.buwryy.net/buwryy")
             about.present(self)
         except AttributeError:
             about = Adw.AboutWindow.new()
@@ -195,7 +195,7 @@ class TikUtilsWindow(Adw.ApplicationWindow):
             about.set_developer_name("buwryme")
             about.set_license_type(Gtk.License.MIT_X11)
             about.set_comments("TikTok utilities app made with GTK4/Libadwaita")
-            about.set_website("https://github.com/buwryme/tikutils")
+            about.set_website("https://git.buwryy.net/buwryy/tikutils")
             about.present()
 
     def show_toast(self, msg):

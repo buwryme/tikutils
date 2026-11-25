@@ -26,7 +26,7 @@ Reverse engineered from Editing News' patcher and made open source.
 ## usage
 
 ```bash
-git clone https://github.com/buwryme/tikutils.git
+git clone https://git.buwryy.net/buwryy/tikutils.git
 cd tikutils
 chmod +x setup.sh; ./setup.sh
 ```
@@ -60,7 +60,7 @@ the older silent-tail method is available with `method = "slsr"`, the header-onl
 
 patcher tuning (method, inflation rate, codec-specific dummy sizes, metadata, and trailing payload) is fetched from a public `.toml` gist. if the fetch fails, the built-in copy is used. encode settings remain available in the app.
 
-the patcher core is a git submodule of [tiktok-lossless-upload](https://github.com/buwryme/tiktok-lossless-upload). it tracks the latest `main` commit; `setup.sh` runs `git submodule update --remote`, sparse-checks out only `tiktok_lossless_patch.py`, and exposes it as `src/backend/patcher_core.py`.
+the patcher core is a git submodule of [tiktok-lossless-upload](https://git.buwryy.net/buwryy/tiktok-lossless-upload). it tracks the latest `main` commit; `setup.sh` runs `git submodule update --remote`, sparse-checks out only `tiktok_lossless_patch.py`, and exposes it as `src/backend/patcher_core.py`.
 
 ---
 
@@ -68,6 +68,6 @@ for inquiries contact **@buwryy** on discord
 
 <div align="center">
 
-**made with ♥ by [buwryme](https://github.com/buwryme)**
+**made with ♥ by [buwryme](https://git.buwryy.net/buwryy)**
 
 </div>
